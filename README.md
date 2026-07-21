@@ -1,2 +1,2 @@
-# The-Bob-Effect
+# EduTubers
 IBM Bob July Challenge
