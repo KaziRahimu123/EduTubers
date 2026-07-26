@@ -89,7 +89,7 @@ flowchart TD
     end
 
     subgraph AI ["Hybrid AI & Inference Pipeline"]
-        Granite["IBM Granite 3.0 20B (watsonx.ai 128K Context Blueprint)"]
+        Granite["IBM Granite 3.0 (watsonx.ai 128K Context Blueprint)"]
         OpenAIModel["OpenAI Asset Engine"]
     end
 

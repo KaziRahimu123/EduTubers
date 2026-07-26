@@ -6,7 +6,7 @@
  * Accepts per-concept accuracy data from the analytics page and returns a
  * structured JSON action plan for the creator.
  *
- * Primary model : IBM Granite 3.0 20B (ibm/granite-3-20b-instruct) via watsonx.ai.
+ * Primary model : IBM Granite 3.0 (ibm/granite-3-8b-instruct) via watsonx.ai.
  * Fallback model: OpenAI gpt-4o — used automatically if Granite fails for any reason
  *                 (403 WML not associated, 500, network error, etc.).
  *

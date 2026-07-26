@@ -423,7 +423,7 @@ EXTRACTION RULES — non-negotiable:
       watsonxUrl,
       watsonxProjectId,
       accessToken,
-      'ibm/granite-3-20b-instruct',
+      process.env.WATSONX_MODEL_ID || 'ibm/granite-3-8b-instruct',
       prompt,
       3000,
     );
