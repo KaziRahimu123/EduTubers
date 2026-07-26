@@ -22,41 +22,6 @@ function ok(data: unknown) { return NextResponse.json({ data }); }
 function err(msg: string, status = 400) { return NextResponse.json({ error: msg }, { status }); }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function supabaseRestGetTable(sbUrl: string, serviceKey: string, table: string, queryParams: string): Promise<any[]> {
-  return new Promise((resolve) => {
-    const parsed = new URL(`${sbUrl}/rest/v1/${table}?${queryParams}`);
-    const req = nodeHttpsRequest(
-      {
-        hostname: parsed.hostname,
-        path: `${parsed.pathname}${parsed.search}`,
-        method: 'GET',
-        headers: {
-          apikey: serviceKey,
-          Authorization: `Bearer ${serviceKey}`,
-        },
-      },
-      (res) => {
-        const chunks: Buffer[] = [];
-        res.on('data', (c: Buffer) => chunks.push(c));
-        res.on('end', () => {
-          const status = res.statusCode ?? 0;
-          const text = Buffer.concat(chunks).toString('utf8');
-          if (status >= 200 && status < 300) {
-            try { resolve(JSON.parse(text)); } catch { resolve([]); }
-          } else {
-            console.error(`[${table} REST error]`, status, text);
-            resolve([]);
-          }
-        });
-        res.on('error', () => resolve([]));
-      },
-    );
-    req.on('error', () => resolve([]));
-    req.end();
-  });
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function supabaseRestGetCourses(sbUrl: string, serviceKey: string, ownerId?: string, userSub?: string): Promise<any[]> {
   return new Promise((resolve) => {
     const subVal = userSub || ownerId || '';
@@ -143,7 +108,8 @@ export async function POST(req: NextRequest) {
   const { op, payload = {} } = body;
   if (!op) return err('Missing op', 400);
 
-  const sb = adminClient ?? supabase;
+  // Call adminClient() function to get the Supabase service-role client instance
+  const sb = typeof adminClient === 'function' ? adminClient() : supabase;
 
   // ── PUBLIC / VISITOR READS & WRITES (no session required) ──────────────────
 
@@ -159,12 +125,20 @@ export async function POST(req: NextRequest) {
   // ── get_reviews ───────────────────────────────────────────────────────────
   if (op === 'get_reviews') {
     const { courseId, slug } = payload as { courseId: string; slug?: string };
-    const sbUrl      = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-    const s = slug || courseId;
-    const filter = `&or=(course_id.eq.${encodeURIComponent(courseId)},course_id.eq.${encodeURIComponent(s)})`;
-    const rows = await supabaseRestGetTable(sbUrl, serviceKey, 'flashcard_reviews', `select=id,course_id,name,comment,created_at${filter}&order=created_at.desc`);
-    const mapped = rows.map((r: { id: string; course_id: string; name: string; comment: string; created_at: string }) => ({
+    let query = sb.from('flashcard_reviews').select('id, course_id, name, comment, created_at').order('created_at', { ascending: false });
+
+    if (slug && slug !== courseId) {
+      query = query.or(`course_id.eq.${courseId},course_id.eq.${slug}`);
+    } else {
+      query = query.eq('course_id', courseId);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      console.error('[get_reviews error]', error.message);
+      return ok([]);
+    }
+    const mapped = (data ?? []).map((r: { id: string; course_id: string; name: string; comment: string; created_at: string }) => ({
       id: r.id, deckId: r.course_id, name: r.name, comment: r.comment, createdAt: r.created_at,
     }));
     return ok(mapped);
@@ -173,10 +147,13 @@ export async function POST(req: NextRequest) {
   // ── get_quiz_attempts ─────────────────────────────────────────────────────
   if (op === 'get_quiz_attempts') {
     const { quizId } = payload as { quizId: string };
-    const sbUrl      = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-    const rows = await supabaseRestGetTable(sbUrl, serviceKey, 'quiz_attempts', `select=id,quiz_id,answers,score,total,percentage_score,passed,attempt_number,completed_at&quiz_id=eq.${encodeURIComponent(quizId)}&order=completed_at.desc`);
-    const mapped = rows.map((r: { id: string; quiz_id: string; answers: unknown; score: number; total: number; percentage_score: number; passed: boolean; attempt_number: number; completed_at: string }) => ({
+    const { data, error } = await sb
+      .from('quiz_attempts')
+      .select('id, quiz_id, answers, score, total, percentage_score, passed, attempt_number, completed_at')
+      .eq('quiz_id', quizId)
+      .order('completed_at', { ascending: false });
+    if (error) { console.error('get_quiz_attempts', error.message); return ok([]); }
+    const mapped = (data ?? []).map((r: { id: string; quiz_id: string; answers: unknown; score: number; total: number; percentage_score: number; passed: boolean; attempt_number: number; completed_at: string }) => ({
       id: r.id, quizId: r.quiz_id, answers: r.answers, score: r.score, total: r.total, percentageScore: r.percentage_score, passed: r.passed, attemptNumber: r.attempt_number, completedAt: r.completed_at,
     }));
     return ok(mapped);
@@ -185,10 +162,13 @@ export async function POST(req: NextRequest) {
   // ── get_task_attempts ─────────────────────────────────────────────────────
   if (op === 'get_task_attempts') {
     const { courseId } = payload as { courseId: string };
-    const sbUrl      = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-    const rows = await supabaseRestGetTable(sbUrl, serviceKey, 'task_attempts', `select=id,course_id,taker_name,results,correct_count,total_count,percentage_score,completed_at&course_id=eq.${encodeURIComponent(courseId)}&order=completed_at.desc`);
-    const mapped = rows.map((r: { id: string; course_id: string; taker_name: string | null; results: unknown; correct_count: number; total_count: number; percentage_score: number; completed_at: string }) => ({
+    const { data, error } = await sb
+      .from('task_attempts')
+      .select('id, course_id, taker_name, results, correct_count, total_count, percentage_score, completed_at')
+      .eq('course_id', courseId)
+      .order('completed_at', { ascending: false });
+    if (error) { console.error('get_task_attempts', error.message); return ok([]); }
+    const mapped = (data ?? []).map((r: { id: string; course_id: string; taker_name: string | null; results: unknown; correct_count: number; total_count: number; percentage_score: number; completed_at: string }) => ({
       id: r.id, courseId: r.course_id, takerName: r.taker_name, results: r.results, correctCount: r.correct_count, totalCount: r.total_count, percentageScore: r.percentage_score, completedAt: r.completed_at,
     }));
     return ok(mapped);
@@ -197,31 +177,36 @@ export async function POST(req: NextRequest) {
   // ── add_review ────────────────────────────────────────────────────────────
   if (op === 'add_review') {
     const { deckId, name, comment } = payload as { deckId: string; name: string; comment: string };
-    const sbUrl      = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-
     let realCourseId = deckId;
+
     try {
       const { data: courseRow } = await sb
         .from('courses')
         .select('id')
-        .or(`id.eq.${encodeURIComponent(deckId)},slug.eq.${encodeURIComponent(deckId)}`)
+        .or(`id.eq.${deckId},slug.eq.${deckId}`)
         .single();
       if (courseRow?.id) realCourseId = courseRow.id;
     } catch {
       /* noop */
     }
 
-    const reviewId   = 'rev_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
-    const { error } = await supabaseRestInsert(sbUrl, serviceKey, 'flashcard_reviews', {
-      id:          reviewId,
-      course_id:   realCourseId,
-      name:        name || 'Anonymous',
-      comment:     comment || '',
-      created_at:  new Date().toISOString(),
-    });
-    if (error) console.error('[add_review REST error]', error);
-    return ok({ id: reviewId, deckId: realCourseId, name, comment, createdAt: new Date().toISOString() });
+    const reviewId = 'rev_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    const { error } = await sb
+      .from('flashcard_reviews')
+      .insert({
+        id:         reviewId,
+        course_id:  realCourseId,
+        name:       name || 'Anonymous',
+        comment:    comment || '',
+        created_at: new Date().toISOString(),
+      });
+
+    if (error) {
+      console.error('[add_review error]', error.message);
+      return err(error.message, 500);
+    }
+
+    return ok({ id: reviewId, deckId: realCourseId, name: name || 'Anonymous', comment, createdAt: new Date().toISOString() });
   }
 
   // ── save_quiz_attempt ─────────────────────────────────────────────────────
