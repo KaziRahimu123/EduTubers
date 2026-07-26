@@ -455,13 +455,13 @@ export default function ContentTypeDetail() {
                             <p className="text-xs text-gray-400 italic py-1">No student reviews received yet for this item.</p>
                           ) : (
                             fb.map(r => (
-                              <div key={r.id} className="bg-gray-50 rounded-lg px-3 py-2 flex items-start gap-2 border border-gray-100">
+                              <div key={r.id} className="bg-gray-50 dark:bg-slate-800 rounded-lg px-3 py-2 flex items-start gap-2 border border-gray-100 dark:border-slate-700">
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center justify-between gap-2">
-                                    <span className="text-xs font-semibold text-gray-800 truncate">{r.name}</span>
-                                    <span className="text-[10px] text-gray-400 flex-shrink-0">{new Date(r.createdAt).toLocaleDateString()}</span>
+                                    <span className="text-xs font-semibold text-gray-900 dark:text-slate-100 truncate">{r.name}</span>
+                                    <span className="text-[10px] text-gray-500 dark:text-slate-400 flex-shrink-0">{new Date(r.createdAt).toLocaleDateString()}</span>
                                   </div>
-                                  <p className="text-xs text-gray-600 mt-0.5 leading-snug">{r.comment}</p>
+                                  <p className="text-xs text-gray-800 dark:text-slate-200 mt-0.5 leading-snug">{r.comment}</p>
                                 </div>
                               </div>
                             ))

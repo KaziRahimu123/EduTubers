@@ -89,7 +89,7 @@ export default function FeedbackForm({ courseId, contentTitle, accentColor = 'pu
           value={name}
           onChange={e => setName(e.target.value)}
           maxLength={40}
-          className={`w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 ${a.ring}`}
+          className={`w-full px-3 py-2 text-sm text-gray-900 dark:text-slate-900 bg-white border border-gray-200 rounded-lg placeholder-gray-400 focus:outline-none focus:ring-2 ${a.ring}`}
         />
         <div>
           <textarea
@@ -98,7 +98,7 @@ export default function FeedbackForm({ courseId, contentTitle, accentColor = 'pu
             onChange={e => setComment(e.target.value.slice(0, 100))}
             required
             rows={2}
-            className={`w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 ${a.ring} resize-none`}
+            className={`w-full px-3 py-2 text-sm text-gray-900 dark:text-slate-900 bg-white border border-gray-200 rounded-lg placeholder-gray-400 focus:outline-none focus:ring-2 ${a.ring} resize-none`}
           />
           <p className="text-xs text-gray-400 text-right -mt-1">{comment.length}/100</p>
         </div>

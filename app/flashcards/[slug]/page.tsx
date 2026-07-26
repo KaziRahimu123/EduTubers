@@ -235,7 +235,7 @@ function PublicFlashcardViewer() {
     setReviewSubmitted(true);
   }
 
-  const inp = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500';
+  const inp = 'w-full px-3 py-2 text-sm text-gray-900 dark:text-slate-900 bg-white border border-gray-200 rounded-lg placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500';
 
   return (
     <div className="min-h-screen bg-gray-50">
