@@ -190,18 +190,23 @@ export default function QuizTakerPage() {
   }
 
   async function handleSubmit() {
+    if (!course) return;
     const finalScore = allQuestions.filter((q, i) => isCorrect(q, answers[i])).length;
     const finalPct   = Math.round((finalScore / allQuestions.length) * 100);
     const finalPass  = finalPct >= (cfg.passingScore ?? 70);
     const attempt: QuizAttemptResult = {
-      id: uid(), quizId: id, answers,
-      score: finalScore, total: allQuestions.length,
-      percentageScore: finalPct, passed: finalPass,
+      id: uid(),
+      quizId: course.id, // Use real course UUID instead of route param (which can be a slug string)
+      answers,
+      score: finalScore,
+      total: allQuestions.length,
+      percentageScore: finalPct,
+      passed: finalPass,
       completedAt: new Date().toISOString(),
       attemptNumber: attemptsUsed + 1,
     };
     await dbSaveQuizAttempt(attempt);
-    dbIncrementCompletions(id);
+    dbIncrementCompletions(course.id);
     setSubmitted(true);
     setCurrentIdx(0);
   }
