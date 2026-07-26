@@ -428,7 +428,7 @@ export default function AnalyticsPage() {
             {insightsLoading && (
               <div className="flex items-center gap-3 py-6 justify-center text-gray-400 dark:text-slate-500">
                 <RefreshCw size={18} className="animate-spin text-violet-400" />
-                <p className="text-sm">IBM Granite 3.0 20B is analysing your audience data…</p>
+                <p className="text-sm">IBM Granite 3.0 is analysing your audience data…</p>
               </div>
             )}
 
@@ -451,7 +451,7 @@ export default function AnalyticsPage() {
             {/* Empty-state hint */}
             {!insights && !insightsLoading && !insightsError && conceptStats.length > 0 && (
               <p className="text-xs text-gray-400 dark:text-slate-500 italic">
-                Click "Generate AI Insights" to have IBM Granite 3.0 20B analyse your audience performance.
+                Click "Generate AI Insights" to have IBM Granite 3.0 analyse your audience performance.
               </p>
             )}
           </div>

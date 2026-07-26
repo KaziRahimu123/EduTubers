@@ -20,7 +20,7 @@ Built for the IBM AI Builders Challenge (July 2026 / Creative Industries & AI).
 | **Why it's different** | Standard AI tools truncate long media past 10 minutes and output static, read-only text summaries. EduTubers processes full-length multi-file sources without truncation and provides built-in studio editors so creators can manually edit every card, question, or task before publishing. |
 | **Who it's for** | Content creators, YouTubers, podcasters, and newsletter writers in the Creative Industries who want to convert passive audience consumption into active recall experiences. |
 | **Full-source, not truncated** | Ingests up to 3 files simultaneously across IBM Granite 3.0's 128K context window on watsonx.ai. Every concept from the beginning, middle, and end of long content is captured with zero tail-end drop-off. |
-| **Hybrid AI Architecture** | Leverages IBM Granite 3.0 (20B, 128K context window via watsonx.ai) for full-source transcript ingestion and topic blueprinting, paired with OpenAI for structured asset generation. |
+| **Hybrid AI Architecture** | Leverages IBM Granite 3.0 (128K context window via watsonx.ai) for full-source transcript ingestion and topic blueprinting, paired with OpenAI for structured asset generation. |
 | **Creator Editing Autonomy** | Zero locked AI outputs. Every generated flashcard, quiz question, choice, explanation, practice task, and content guide is 100% editable in custom built-in studio editors before publishing. |
 | **Built with** | **IBM Granite 3.0 (watsonx.ai)** · **OpenAI** · **Next.js 16** · **Supabase (PostgreSQL)** · **Auth0** · **Tailwind CSS v4** · **TypeScript** |
 
@@ -114,9 +114,9 @@ flowchart TD
 
 - **Application & Session Layer:** Built on Next.js 16 (App Router) and React 19 with TypeScript and Tailwind CSS v4. User authentication and API session security are enforced server-side via Auth0 (`@auth0/nextjs-auth0`).
 - **Media Ingestion & Processing:** Media files (audio MP3/WAV, video MP4/WebM) are processed at `/api/transcribe` using `ffmpeg-static` and `fluent-ffmpeg` before calling OpenAI Whisper-1 via native multipart streams. Document files (PDFs) are extracted at `/api/extract-pdf` using `pdf-parse`.
-- **Two-Stage Hybrid AI Pipeline:** Generation is coordinated at `/api/generate`: Stage 1 (IBM Granite 3.0 20B via watsonx.ai) ingests full-source transcripts across IBM Granite's 128K context window, extracting a complete topic blueprint with zero tail-end truncation. Stage 2 (OpenAI Generation Engine) receives Granite's blueprint and generates 5 structured active-recall formats with full autonomous density allocation.
+- **Two-Stage Hybrid AI Pipeline:** Generation is coordinated at `/api/generate`: Stage 1 (IBM Granite 3.0 via watsonx.ai) ingests full-source transcripts across IBM Granite's 128K context window, extracting a complete topic blueprint with zero tail-end truncation. Stage 2 (OpenAI Generation Engine) receives Granite's blueprint and generates 5 structured active-recall formats with full autonomous density allocation.
 - **Database & Asset Persistence:** All course records, quiz attempts, and user assets are stored in Supabase PostgreSQL via an authenticated REST proxy (`/api/db`) with strict Row-Level Security (RLS). AI-generated images are stored in Supabase Storage via `/api/upload-image`.
-- **Quiz Analytics & AI Creator Action Plan:** Audience quiz attempt results are logged in Supabase. The `/api/analytics-insights` endpoint ranks missed questions from most-wrong to least-wrong and invokes IBM Granite 3.0 (20B) on watsonx.ai to generate a targeted 60-Second Video Recap Script for the creator.
+- **Quiz Analytics & AI Creator Action Plan:** Audience quiz attempt results are logged in Supabase. The `/api/analytics-insights` endpoint ranks missed questions from most-wrong to least-wrong and invokes IBM Granite 3.0 on watsonx.ai to generate a targeted 60-Second Video Recap Script for the creator.
 
 ---
 
@@ -124,7 +124,7 @@ flowchart TD
 
 IBM Bob was utilized as an AI pair programmer and systems architect throughout the complete development lifecycle of EduTubers:
 
-- **Hybrid Pipeline Architecture:** Designed the two-stage AI architecture—using IBM Granite 3.0 (20B) on watsonx.ai for 128K full-source transcript ingestion and topic blueprinting paired with structured asset engines.
+- **Hybrid Pipeline Architecture:** Designed the two-stage AI architecture—using IBM Granite 3.0 on watsonx.ai for 128K full-source transcript ingestion and topic blueprinting paired with structured asset engines.
 - **API & Network Hardening:** Hardened serverless REST proxy endpoints (`/api/db`), resolved database unique slug key collisions server-side, and optimized Whisper multipart stream handlers to eliminate TLS record errors.
 - **Studio Editor Engineering:** Refactored built-in in-browser studio editors for all 5 formats (Flashcard Decks, Audience Quizzes, Practice Tasks, Content Guides, and Illustrated Explainers), giving creators 100% manual editing control.
 - **Closed-Loop Analytics Engine:** Built the quiz response performance ranker and automated the IBM Granite 60-Second Video Recap Script generator in `/api/analytics-insights`.
