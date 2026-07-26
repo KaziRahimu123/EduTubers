@@ -22,9 +22,12 @@ function ok(data: unknown) { return NextResponse.json({ data }); }
 function err(msg: string, status = 400) { return NextResponse.json({ error: msg }, { status }); }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function supabaseRestGetCourses(sbUrl: string, serviceKey: string, ownerId?: string): Promise<any[]> {
+function supabaseRestGetCourses(sbUrl: string, serviceKey: string, ownerId?: string, userSub?: string): Promise<any[]> {
   return new Promise((resolve) => {
-    const ownerFilter = ownerId ? `&owner_id=eq.${encodeURIComponent(ownerId)}` : '';
+    const subVal = userSub || ownerId || '';
+    const ownerFilter = ownerId
+      ? `&or=(owner_id.eq.${encodeURIComponent(ownerId)},owner_id.eq.${encodeURIComponent(subVal)},owner_id.is.null)`
+      : '';
     const parsed = new URL(`${sbUrl}/rest/v1/courses?select=*${ownerFilter}&order=updated_at.desc`);
     const req = nodeHttpsRequest(
       {
@@ -253,18 +256,18 @@ export async function POST(req: NextRequest) {
   const user = await getAuth0User();
   if (!user) return err('Not authenticated', 401);
 
-  // ── get_courses (filtered by owner_id) ───────────────────────────────────
+  // ── get_courses (filtered by owner_id or user.sub) ─────────────────────────
   if (op === 'get_courses') {
     const sbUrl      = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
-    const rows = await supabaseRestGetCourses(sbUrl, serviceKey, user.id);
+    const rows = await supabaseRestGetCourses(sbUrl, serviceKey, user.id, user.sub);
     return ok(rows);
   }
 
   // ── get_course ────────────────────────────────────────────────────────────
   if (op === 'get_course') {
     const { id } = payload as { id: string };
-    const { data, error } = await sb.from('courses').select('*').eq('id', id).eq('owner_id', user.id).single();
+    const { data, error } = await sb.from('courses').select('*').eq('id', id).single();
     if (error || !data) return ok(null);
     return ok(data);
   }
@@ -287,7 +290,7 @@ export async function POST(req: NextRequest) {
       await sb.storage.from('images').remove(imgRows.map(r => r.storage_path as string));
     }
     await sb.from('images').delete().eq('course_id', id);
-    const { error } = await sb.from('courses').delete().eq('id', id).eq('owner_id', user.id);
+    const { error } = await sb.from('courses').delete().eq('id', id);
     if (error) { console.error('delete_course', error); return err(error.message); }
     return ok(null);
   }
