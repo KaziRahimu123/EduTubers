@@ -129,11 +129,13 @@ function PublicFlashcardViewer() {
         const payload = decodePayload(encoded);
         if (!payload) { setNotFound(true); return; }
         const cards: Flashcard[] = payload.cards.map((c, i) => ({ id: String(i), front: c.front, back: c.back, ...(c.image ? { image: c.image } : {}) }));
-        setDeck({ title: payload.title, description: payload.description, colorful: payload.colorful, cards });
         const c = await dbGetCourseBySlug(slug);
         if (c) {
+          setDeck({ title: payload.title, description: payload.description, colorful: payload.colorful, cards, deckId: c.id });
           dbIncrementViews(c.id);
-          setReviews(await dbGetReviews(c.id));
+          setReviews(await dbGetReviews(c.id, c.slug));
+        } else {
+          setDeck({ title: payload.title, description: payload.description, colorful: payload.colorful, cards });
         }
         return;
       }

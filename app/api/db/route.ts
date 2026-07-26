@@ -199,16 +199,29 @@ export async function POST(req: NextRequest) {
     const { deckId, name, comment } = payload as { deckId: string; name: string; comment: string };
     const sbUrl      = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+
+    let realCourseId = deckId;
+    try {
+      const { data: courseRow } = await sb
+        .from('courses')
+        .select('id')
+        .or(`id.eq.${encodeURIComponent(deckId)},slug.eq.${encodeURIComponent(deckId)}`)
+        .single();
+      if (courseRow?.id) realCourseId = courseRow.id;
+    } catch {
+      /* noop */
+    }
+
     const reviewId   = 'rev_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
     const { error } = await supabaseRestInsert(sbUrl, serviceKey, 'flashcard_reviews', {
       id:          reviewId,
-      course_id:   deckId,
+      course_id:   realCourseId,
       name:        name || 'Anonymous',
       comment:     comment || '',
       created_at:  new Date().toISOString(),
     });
     if (error) console.error('[add_review REST error]', error);
-    return ok({ id: reviewId, deckId, name, comment, createdAt: new Date().toISOString() });
+    return ok({ id: reviewId, deckId: realCourseId, name, comment, createdAt: new Date().toISOString() });
   }
 
   // ── save_quiz_attempt ─────────────────────────────────────────────────────
