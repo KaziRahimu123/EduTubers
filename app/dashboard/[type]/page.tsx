@@ -55,6 +55,7 @@ export default function ContentTypeDetail() {
       await Promise.all(filtered.map(async c => {
         const reviews = await dbGetReviews(c.id, c.slug);
         fbMap[c.id] = reviews;
+        if (c.slug) fbMap[c.slug] = reviews;
       }));
       setFeedbackMap(fbMap);
       // review counts for all content types
@@ -445,7 +446,7 @@ export default function ContentTypeDetail() {
 
                 {/* ── Feedback row (all content types) ─────────────── */}
                 {(() => {
-                  const fb = feedbackMap[item.id] ?? [];
+                  const fb = (feedbackMap[item.id] ?? (item.slug ? feedbackMap[item.slug] : [])) ?? [];
                   const expanded = expandedFeedback[item.id] ?? false;
                   return (
                     <div className="mt-3 pt-3 border-t border-gray-100">
