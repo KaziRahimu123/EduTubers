@@ -178,7 +178,7 @@ export async function POST(req: NextRequest) {
     const seen = new Set<string>();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const deduplicated = allRows.filter((r: any) => {
-      if (seen.has(r.id)) return false;
+      if (!r || !r.id || seen.has(r.id)) return false;
       seen.add(r.id);
       return true;
     });
@@ -224,6 +224,7 @@ export async function POST(req: NextRequest) {
     const { deckId, name, comment } = payload as { deckId: string; name: string; comment: string };
     let realCourseId = deckId;
 
+    // Resolve course.id if deckId passed was a slug
     try {
       const courseRows = await supabaseRestGetTable(
         sbUrl,
@@ -238,9 +239,9 @@ export async function POST(req: NextRequest) {
       /* noop */
     }
 
-    const reviewId = 'rev_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    // Do NOT pass a custom text id string ("rev_...") because PostgreSQL requires UUID type for id column!
+    // Omit id so PostgreSQL gen_random_uuid() automatically creates a valid UUID primary key.
     const reviewRow = {
-      id:          reviewId,
       course_id:   realCourseId,
       name:        name || 'Anonymous',
       comment:     comment || '',
@@ -251,7 +252,8 @@ export async function POST(req: NextRequest) {
     await supabaseRestInsert(sbUrl, serviceKey, 'flashcard_reviews', reviewRow);
     await supabaseRestInsert(sbUrl, serviceKey, 'quiz_reviews', reviewRow);
 
-    return ok({ id: reviewId, deckId: realCourseId, name: name || 'Anonymous', comment, createdAt: new Date().toISOString() });
+    const generatedId = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    return ok({ id: generatedId, deckId: realCourseId, name: name || 'Anonymous', comment, createdAt: new Date().toISOString() });
   }
 
   // ── save_quiz_attempt ─────────────────────────────────────────────────────
