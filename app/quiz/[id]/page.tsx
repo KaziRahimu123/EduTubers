@@ -454,6 +454,11 @@ export default function QuizTakerPage() {
             })}
           </div>
         )}
+
+        {/* ── Feedback Form ─────────────────────────────────────── */}
+        <div className="mt-8 pt-6 border-t border-gray-200 dark:border-slate-800">
+          <FeedbackForm courseId={course.id} contentTitle={course.title} accentColor="orange" />
+        </div>
       </div>
     </div>
   );

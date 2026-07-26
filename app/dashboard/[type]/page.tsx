@@ -57,32 +57,10 @@ export default function ContentTypeDetail() {
         fbMap[c.id] = reviews;
       }));
       setFeedbackMap(fbMap);
-      // review counts for flashcard decks badge
-      if (tid === 'review_cards' || tid === 'flashcards') {
-        const counts: Record<string, number> = {};
-        filtered.forEach(c => { counts[c.id] = fbMap[c.id]?.length ?? 0; });
-        setReviewCounts(counts);
-      }
-
-      // Load attempt counts + full attempts for quizzes
-      if (typeId === 'quiz') {
-        const counts: Record<string, number> = {};
-        const qMap: Record<string, QuizAttemptResult[]> = {};
-        await Promise.all(filtered.map(async c => {
-          const attempts = await dbGetQuizAttempts(c.id);
-          counts[c.id] = attempts.length;
-          qMap[c.id] = attempts;
-        }));
-        setAttemptCounts(counts);
-        setQuizAttemptsMap(qMap);
-      }
-
-      // Load review counts for activities (same as flashcards)
-      if (typeId === 'activities') {
-        const counts: Record<string, number> = {};
-        filtered.forEach(c => { counts[c.id] = fbMap[c.id]?.length ?? 0; });
-        setReviewCounts(counts);
-      }
+      // review counts for all content types
+      const counts: Record<string, number> = {};
+      filtered.forEach(c => { counts[c.id] = fbMap[c.id]?.length ?? 0; });
+      setReviewCounts(counts);
 
       // Load task attempts for Interactive Challenges
       if (typeId === 'activities') {

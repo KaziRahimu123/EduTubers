@@ -252,16 +252,8 @@ export async function dbDeleteImages(courseId: string): Promise<void> {
 // ── Reviews ───────────────────────────────────────────────────────────────────
 
 export async function dbGetReviews(courseId: string): Promise<FlashcardReview[]> {
-  const { data, error } = await supabase
-    .from('quiz_reviews')
-    .select('*')
-    .eq('course_id', courseId)
-    .order('created_at', { ascending: false });
-  if (error) return [];
-  return (data ?? []).map(r => ({
-    id: r.id, deckId: r.course_id, name: r.name,
-    comment: r.comment, createdAt: r.created_at,
-  }));
+  const data = await dbProxy<FlashcardReview[]>('get_reviews', { courseId });
+  return data ?? [];
 }
 
 export async function dbAddReview(review: { courseId: string; name: string; comment: string; rating?: number }): Promise<FlashcardReview | null> {
