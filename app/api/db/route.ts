@@ -162,14 +162,28 @@ export async function POST(req: NextRequest) {
   if (op === 'get_reviews') {
     const { courseId, slug } = payload as { courseId: string; slug?: string };
     const targets = Array.from(new Set([courseId, slug].filter(Boolean))) as string[];
-    const filter = targets.map(t => `course_id.eq.${encodeURIComponent(t)}`).join(',');
-    const rows = await supabaseRestGetTable(
-      sbUrl,
-      serviceKey,
-      'flashcard_reviews',
-      `select=id,course_id,name,comment,created_at&or=(${filter})&order=created_at.desc`,
-    );
-    const mapped = rows.map((r: { id: string; course_id: string; name: string; comment: string; created_at: string }) => ({
+    let queryString = `select=id,course_id,name,comment,created_at&order=created_at.desc`;
+
+    if (targets.length === 1) {
+      queryString += `&course_id=eq.${encodeURIComponent(targets[0])}`;
+    } else if (targets.length > 1) {
+      const conds = targets.map(t => `course_id.eq.${encodeURIComponent(t)}`).join(',');
+      queryString += `&or=(${conds})`;
+    }
+
+    const fcRows   = await supabaseRestGetTable(sbUrl, serviceKey, 'flashcard_reviews', queryString);
+    const quizRows = await supabaseRestGetTable(sbUrl, serviceKey, 'quiz_reviews', queryString);
+
+    const allRows = [...fcRows, ...quizRows];
+    const seen = new Set<string>();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const deduplicated = allRows.filter((r: any) => {
+      if (seen.has(r.id)) return false;
+      seen.add(r.id);
+      return true;
+    });
+
+    const mapped = deduplicated.map((r: { id: string; course_id: string; name: string; comment: string; created_at: string }) => ({
       id: r.id, deckId: r.course_id, name: r.name, comment: r.comment, createdAt: r.created_at,
     }));
     return ok(mapped);
@@ -210,7 +224,6 @@ export async function POST(req: NextRequest) {
     const { deckId, name, comment } = payload as { deckId: string; name: string; comment: string };
     let realCourseId = deckId;
 
-    // Resolve course.id if deckId passed was a slug
     try {
       const courseRows = await supabaseRestGetTable(
         sbUrl,
@@ -226,17 +239,17 @@ export async function POST(req: NextRequest) {
     }
 
     const reviewId = 'rev_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
-    const { error } = await supabaseRestInsert(sbUrl, serviceKey, 'flashcard_reviews', {
+    const reviewRow = {
       id:          reviewId,
       course_id:   realCourseId,
       name:        name || 'Anonymous',
       comment:     comment || '',
       created_at:  new Date().toISOString(),
-    });
+    };
 
-    if (error) {
-      console.error('[add_review REST error]', error);
-    }
+    // Insert into both tables to ensure compatibility regardless of DB schema variations
+    await supabaseRestInsert(sbUrl, serviceKey, 'flashcard_reviews', reviewRow);
+    await supabaseRestInsert(sbUrl, serviceKey, 'quiz_reviews', reviewRow);
 
     return ok({ id: reviewId, deckId: realCourseId, name: name || 'Anonymous', comment, createdAt: new Date().toISOString() });
   }
