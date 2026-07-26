@@ -6,19 +6,25 @@ const MAX_SINGLE_PDF_BYTES = 100 * 1024 * 1024; // 100 MB per file
 const MAX_COMBINED_BYTES   = 100 * 1024 * 1024; // 100 MB combined
 
 async function parsePdf(arrayBuffer: ArrayBuffer): Promise<string> {
-  // pdf-parse v2 exports a class; pass buffer via `data` then call getText().
-  // The worker defaults to a relative "./pdf.worker.mjs" which breaks in Next.js —
-  // resolve it to an absolute file:// URL before constructing the parser.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { PDFParse } = require('pdf-parse') as {
-    PDFParse: { new (opts: { data: ArrayBuffer }): { getText(): Promise<{ text: string }> }; setWorker(s: string): void };
-  };
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const workerPath = path.join(path.dirname(require.resolve('pdf-parse')), 'pdf.worker.mjs');
-  PDFParse.setWorker('file://' + workerPath);
-  const parser = new PDFParse({ data: arrayBuffer });
-  const result = await parser.getText();
-  return result.text?.trim() ?? '';
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const pdfPkg = require('pdf-parse');
+    if (pdfPkg.PDFParse) {
+      try {
+        const workerPath = path.join(path.dirname(require.resolve('pdf-parse')), 'pdf.worker.mjs');
+        pdfPkg.PDFParse.setWorker('file://' + workerPath);
+      } catch { /* ignore worker path error on Vercel serverless */ }
+      const parser = new pdfPkg.PDFParse({ data: arrayBuffer });
+      const result = await parser.getText();
+      return result.text?.trim() ?? '';
+    } else if (typeof pdfPkg === 'function') {
+      const data = await pdfPkg(Buffer.from(arrayBuffer));
+      return data.text?.trim() ?? '';
+    }
+  } catch (e) {
+    console.error('PDF parsing error:', e);
+  }
+  return '';
 }
 
 // ── Single-file handler (POST with FormData `file`) ───────────────────────────
