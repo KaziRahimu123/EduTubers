@@ -7,7 +7,6 @@ import Layout from '@/components/Layout';
 import { useTheme } from '@/components/ThemeProvider';
 import type { Theme } from '@/lib/auth';
 import { useAuthGuard } from '@/lib/useAuthGuard';
-import Link from 'next/link';
 import clsx from 'clsx';
 
 const THEMES: { id: Theme; label: string; Icon: React.ComponentType<{ size?: number; className?: string }> }[] = [
@@ -73,18 +72,6 @@ export default function SettingsPage() {
               <CheckCircle size={13} /> Appearance saved.
             </div>
           )}
-        </div>
-
-        {/* ── Brand Kit link ────────────────────────────────────────────── */}
-        <div className="bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-600 p-5 mb-4">
-          <h2 className="font-semibold text-gray-900 dark:text-white text-sm mb-1">Creator Brand Kit</h2>
-          <p className="text-xs text-gray-500 dark:text-slate-400 mb-3">Manage your logo, colors, fonts, CTA, watermark, and tone used across all generated assets.</p>
-          <Link
-            href="/brand-kit"
-            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors"
-          >
-            Open Brand Kit
-          </Link>
         </div>
 
         {/* Done */}

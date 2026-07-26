@@ -3,10 +3,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Printer, ChevronDown, ChevronUp, BookOpen, Target, List, FileText, CheckSquare, Palette, Pencil, ImageOff, RefreshCw, Upload } from 'lucide-react';
-import { dbGetCourse, dbSaveCourse, dbUploadImage } from '@/lib/db';
-import { useAuthGuard } from '@/lib/useAuthGuard';
+import { ArrowLeft, Printer, ChevronDown, ChevronUp, BookOpen, Target, List, FileText, CheckSquare, Palette, Pencil, ImageOff, RefreshCw, Upload, Lock, Globe, CheckCircle } from 'lucide-react';
+import { dbGetCourse, dbSaveCourse, dbUploadImage, dbIncrementViews, dbProxy } from '@/lib/db';
+import { useIsCreator } from '@/lib/useIsCreator';
 import type { PdfPack, PdfSection, Course } from '@/lib/types';
+import { cleanTitle } from '@/lib/cleanTitle';
 import FeedbackForm from '@/components/FeedbackForm';
 import FontSelector from '@/components/FontSelector';
 import RichNotesEditor, { mdToHtml, htmlToMd } from '@/components/RichNotesEditor';
@@ -14,16 +15,25 @@ import { loadFontSettings, saveFontSettings, loadFontSettingsFromCourse, getFont
 import type { FontSettings } from '@/lib/fontConfig';
 
 // ── Image generation helper ───────────────────────────────────────────────────
-async function generateSectionImage(title: string, overview: string): Promise<string | null> {
+// Passes courseId + sectionIndex so the server uploads to Storage AND patches
+// courses.modules[0].pdfPack.sections[sectionIndex].imageUrl directly.
+// Falls back to dataUrl if publicUrl is absent (e.g. storage misconfiguration).
+async function generateSectionImage(
+  title: string,
+  overview: string,
+  courseId: string,
+  sectionIndex: number,
+): Promise<string> {
   const res = await fetch('/api/generate-image', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, context: overview }),
+    body: JSON.stringify({ title, context: overview, courseId, sectionIndex }),
   });
-  const data = await res.json() as { dataUrl?: string; error?: string };
+  const data = await res.json() as { publicUrl?: string; dataUrl?: string; error?: string };
   if (data.error) throw new Error(data.error);
-  if (!data.dataUrl) throw new Error('No image returned');
-  return data.dataUrl;
+  const url = data.publicUrl || data.dataUrl;
+  if (!url) throw new Error('No image returned');
+  return url;
 }
 
 // ── Color palette ─────────────────────────────────────────────────────────────
@@ -551,10 +561,10 @@ function SectionCard({
           );
         })()}
 
-        {/* Review questions */}
+        {/* Discussion prompts */}
         {section.reviewQuestions?.length > 0 && (
           <div>
-            <p className="pdf-block-label text-xs font-bold uppercase tracking-widest text-gray-400 mb-3">Review Questions</p>
+            <p className="pdf-block-label text-xs font-bold uppercase tracking-widest text-gray-400 mb-3">Discussion Prompts</p>
             <div className="space-y-3">
               {section.reviewQuestions.map((rq, qi) => (
                 <div key={qi} className="pdf-review-question border border-gray-200 rounded-xl p-4">
@@ -585,13 +595,14 @@ function SectionCard({
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function PdfPackPage() {
-  const ready = useAuthGuard();
+  const isCreator = useIsCreator();
   const params = useParams();
   const id = params.id as string;
 
   const [pack, setPack] = useState<PdfPack | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [course, setCourseState] = useState<Course | null>(null);
+  const [saved, setSaved] = useState(false);
   const [showAnswers, setShowAnswers] = useState(false);
   const [sectionColors, setSectionColors] = useState<Record<number, string>>({});
   const [coverColor, setCoverColor] = useState<string>(PALETTE[0].bg);
@@ -610,7 +621,6 @@ export default function PdfPackPage() {
   }, []);
 
   useEffect(() => {
-    if (!ready) return;
     imageStateRef.current = {};
     (async () => {
       const DELAYS = [300, 700, 1500, 2500, 3000];
@@ -621,7 +631,8 @@ export default function PdfPackPage() {
       }
       if (!c) { setNotFound(true); return; }
       setCourseState(c);
-      document.title = c.title;
+      document.title = cleanTitle(c.title);
+      if (c.status === 'published') dbIncrementViews(c.id);
       const p = c.modules[0]?.pdfPack;
       if (p) {
         setPack(p);
@@ -637,8 +648,8 @@ export default function PdfPackPage() {
         // Generate images for each section (sequentially to avoid rate limits)
         // Only runs if the course was created with generateImages=true
         const generateAll = async (loadedCourse: Course, loadedPack: PdfPack) => {
-          let updatedSections = [...loadedPack.sections];
-          let dirty = false;
+          // Track the latest sections so each save includes all previously-saved images
+          let latestSections = [...loadedPack.sections];
           for (let i = 0; i < loadedPack.sections.length; i++) {
             const section = loadedPack.sections[i];
             // Always show already-saved image immediately
@@ -652,34 +663,30 @@ export default function PdfPackPage() {
             imageStateRef.current = { ...imageStateRef.current, [i]: null };
             setImageState(prev => ({ ...prev, [i]: null }));
             try {
-              const dataUrl = await generateSectionImage(section.title, section.overview ?? '');
-              if (dataUrl) {
-                // Upload to Supabase Storage; store only the public URL
-                const publicUrl = await dbUploadImage(loadedCourse.id, i, dataUrl) ?? dataUrl;
-                imageStateRef.current = { ...imageStateRef.current, [i]: publicUrl };
-                setImageState(prev => ({ ...prev, [i]: publicUrl }));
-                updatedSections = updatedSections.map((s, j) => j === i ? { ...s, imageUrl: publicUrl } : s);
-                dirty = true;
-              }
+              // Server uploads to Storage AND patches courses.modules[0].pdfPack.sections[i].imageUrl
+              // directly — returns publicUrl (or dataUrl fallback). Belt-and-suspenders: also
+              // call dbSaveCourse so the full course row is guaranteed up-to-date.
+              const publicUrl = await generateSectionImage(section.title, section.overview ?? '', loadedCourse.id, i);
+              imageStateRef.current = { ...imageStateRef.current, [i]: publicUrl };
+              setImageState(prev => ({ ...prev, [i]: publicUrl }));
+              latestSections = latestSections.map((s, j) => j === i ? { ...s, imageUrl: publicUrl } : s);
+              const updatedPack = { ...loadedPack, sections: latestSections };
+              const updatedCourse = { ...loadedCourse, modules: loadedCourse.modules.map((m, idx) => idx === 0 ? { ...m, pdfPack: updatedPack } : m) };
+              setPack(updatedPack);
+              setCourseState(updatedCourse);
+              await dbSaveCourse(updatedCourse);
             } catch {
+              // Timeout or network error — surface Retry/Upload buttons immediately
               imageStateRef.current = { ...imageStateRef.current, [i]: '' };
               setImageState(prev => ({ ...prev, [i]: '' }));
             }
-          }
-          // Persist any newly generated imageUrls back to Supabase in one write
-          if (dirty) {
-            const updatedPack = { ...loadedPack, sections: updatedSections };
-            const updatedCourse = { ...loadedCourse, modules: loadedCourse.modules.map((m, i) => i === 0 ? { ...m, pdfPack: updatedPack } : m) };
-            setPack(updatedPack);
-            setCourseState(updatedCourse);
-            dbSaveCourse(updatedCourse);
           }
         };
         generateAll(c, p);
       }
     })();
-    return () => { document.title = 'Downloadable Content Guide'; };
-  }, [ready, id]);
+    return () => { document.title = 'Content Guide'; };
+  }, [id]);
 
   // Load font settings — prefer value saved on the course row (Supabase), fall back to localStorage
   useEffect(() => {
@@ -761,17 +768,16 @@ export default function PdfPackPage() {
     if (!section || !pack || !course) return;
     imageStateRef.current = { ...imageStateRef.current, [index]: null };
     setImageState(prev => ({ ...prev, [index]: null }));
-    generateSectionImage(section.title, section.overview ?? '')
-      .then(async dataUrl => {
-        if (dataUrl) {
-          const publicUrl = await dbUploadImage(course.id, index, dataUrl) ?? dataUrl;
-          imageStateRef.current = { ...imageStateRef.current, [index]: publicUrl };
-          setImageState(prev => ({ ...prev, [index]: publicUrl }));
-          const sections = pack.sections.map((s, i) => i === index ? { ...s, imageUrl: publicUrl } : s);
-          persistPack({ ...pack, sections });
-        }
+    // Server uploads to Storage AND patches the course row directly
+    generateSectionImage(section.title, section.overview ?? '', course.id, index)
+      .then(publicUrl => {
+        imageStateRef.current = { ...imageStateRef.current, [index]: publicUrl };
+        setImageState(prev => ({ ...prev, [index]: publicUrl }));
+        const sections = pack.sections.map((s, i) => i === index ? { ...s, imageUrl: publicUrl } : s);
+        persistPack({ ...pack, sections });
       })
       .catch(() => {
+        // Timeout or network error — surface Retry/Upload buttons immediately
         imageStateRef.current = { ...imageStateRef.current, [index]: '' };
         setImageState(prev => ({ ...prev, [index]: '' }));
       });
@@ -801,18 +807,55 @@ export default function PdfPackPage() {
     window.print();
   }
 
-  if (!ready) return null;
+  async function togglePublish() {
+    if (!course) return;
+    const isPublishing = course.status !== 'published';
+    let slug = course.slug;
+    if (isPublishing && (!slug || slug.trim() === '')) {
+      const res = await dbProxy<{ slug: string }>('make_slug', { title: course.title, existingCourseId: course.id });
+      slug = res?.slug ?? course.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 60);
+    }
+    const updated: Course = {
+      ...course,
+      status: isPublishing ? 'published' : 'draft',
+      slug,
+    };
+    setCourseState(updated);
+    await dbSaveCourse(updated);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
+  }
+
   if (!pack) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         {notFound ? (
-          <p className="text-gray-500">Not found. <Link href="/dashboard" className="text-blue-600 underline">Dashboard</Link></p>
+          <p className="text-gray-500">Content not found.</p>
         ) : (
           <div className="flex flex-col items-center gap-3">
             <div className="w-8 h-8 border-4 border-green-400 border-t-transparent rounded-full animate-spin" />
             <p className="text-sm text-gray-400">Loading…</p>
           </div>
         )}
+      </div>
+    );
+  }
+
+  if (!isCreator && course && course.status !== 'published') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-slate-900 p-4 text-center">
+        <div className="max-w-md bg-white dark:bg-slate-800 rounded-2xl border border-gray-200 dark:border-slate-700 p-8 shadow-sm">
+          <div className="w-12 h-12 rounded-full bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto mb-4">
+            <Lock size={24} />
+          </div>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Content Unavailable</h2>
+          <p className="text-sm text-gray-500 dark:text-slate-400 mb-6">
+            This content is currently unpublished or set to draft mode by the creator.
+          </p>
+          <a href="/" className="inline-flex items-center justify-center px-4 py-2 bg-blue-600 text-white font-medium text-sm rounded-lg hover:bg-blue-700 transition-colors">
+            Return Home
+          </a>
+        </div>
       </div>
     );
   }
@@ -824,11 +867,15 @@ export default function PdfPackPage() {
       {/* ── Toolbar ──────────────────────────────────────────────────────── */}
       <div className="print:hidden sticky top-0 z-40 bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <Link href="/dashboard" className="inline-flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900">
-            <ArrowLeft size={15} /> Back
-          </Link>
-          <span className="text-gray-300">|</span>
-          <span className="text-sm font-medium text-gray-700 truncate max-w-xs">{course?.title}</span>
+          {isCreator && (
+            <>
+              <Link href="/dashboard" className="inline-flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900">
+                <ArrowLeft size={15} /> Back
+              </Link>
+              <span className="text-gray-300">|</span>
+            </>
+          )}
+          <span className="text-sm font-medium text-gray-700 truncate max-w-xs">{cleanTitle(course?.title ?? '')}</span>
         </div>
         <div className="flex items-center gap-3">
           <span className="print:hidden text-xs text-gray-400 hidden sm:block">Click any text to edit</span>
@@ -875,7 +922,6 @@ export default function PdfPackPage() {
                   </div>
                 )}
               </div>
-              <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: coverPalette.text, opacity: 0.7 }}>Downloadable Content Guide</p>
               <h1 className="text-3xl font-bold leading-tight mb-3">
                 <Editable value={pack.title} onChange={v => persistPack({ ...pack, title: v })}
                   className="text-3xl font-bold leading-tight" style={{ color: coverPalette.text }} placeholder="Pack title…" />

@@ -4,13 +4,13 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
-  ArrowLeft, ChevronRight, ChevronLeft, CheckCircle,
-  Lightbulb, RotateCcw, BookOpen, ListChecks, X,
+  ChevronRight, ChevronLeft, CheckCircle,
+  Lightbulb, RotateCcw, BookOpen, ListChecks, X, MessageSquare, Send, Lock,
 } from 'lucide-react';
-import { dbGetCourse } from '@/lib/db';
-import type { Course, PracticeTask, PracticeTaskConfig } from '@/lib/types';
+import { dbGetCourse, dbGetReviews, dbAddReview, dbSaveTaskAttempt, dbIncrementViews, dbIncrementCompletions } from '@/lib/db';
+import { cleanTitle } from '@/lib/cleanTitle';
+import type { Course, PracticeTask, PracticeTaskConfig, FlashcardReview } from '@/lib/types';
 import clsx from 'clsx';
-import FeedbackForm from '@/components/FeedbackForm';
 
 // ── Difficulty badge ──────────────────────────────────────────────────────────
 
@@ -433,11 +433,34 @@ function TaskCard({
 // ── Results screen ────────────────────────────────────────────────────────────
 
 function ResultsScreen({
-  tasks, completedIds, onRestart, courseId, courseTitle,
-}: { tasks: PracticeTask[]; completedIds: Set<string>; onRestart: () => void; courseId: string; courseTitle: string }) {
-  const correct = tasks.filter(t => completedIds.has(t.id)).length;
+  tasks, correctIds, answeredIds, onRestart, courseId,
+}: {
+  tasks: PracticeTask[];
+  correctIds: Set<string>;
+  answeredIds: Set<string>;
+  onRestart: () => void;
+  courseId: string;
+}) {
+  const correct = tasks.filter(t => correctIds.has(t.id)).length;
   const total = tasks.length;
   const pct = total > 0 ? Math.round((correct / total) * 100) : 0;
+
+  // Save attempt once on mount — works for anonymous users too
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    if (saved) return;
+    setSaved(true);
+    dbSaveTaskAttempt({
+      courseId,
+      takerName: null, // anonymous — no login required
+      results: tasks.map(t => ({ taskId: t.id, correct: correctIds.has(t.id) })),
+      correctCount: correct,
+      totalCount: total,
+      percentageScore: pct,
+      completedAt: new Date().toISOString(),
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="space-y-4">
@@ -459,16 +482,25 @@ function ResultsScreen({
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Task summary</p>
         <div className="space-y-2">
           {tasks.map((task, i) => {
-            const done = completedIds.has(task.id);
+            const isCorrect = correctIds.has(task.id);
+            const isAnswered = answeredIds.has(task.id);
             return (
               <div key={task.id} className="flex items-center gap-2.5">
                 <span className={clsx(
                   'flex-shrink-0 w-4 h-4 rounded border-2 flex items-center justify-center',
-                  done ? 'bg-green-600 border-green-600' : 'border-gray-300',
+                  isCorrect  ? 'bg-green-600 border-green-600'
+                  : isAnswered ? 'bg-rose-400 border-rose-400'
+                  : 'border-gray-300',
                 )}>
-                  {done && <CheckCircle size={10} className="text-white" />}
+                  {isCorrect && <CheckCircle size={10} className="text-white" />}
+                  {isAnswered && !isCorrect && <span className="text-white text-[8px] font-bold">✗</span>}
                 </span>
-                <span className={clsx('text-xs flex-1', done ? 'text-gray-500 line-through' : 'text-gray-700')}>
+                <span className={clsx(
+                  'text-xs flex-1',
+                  isCorrect ? 'text-gray-500 line-through'
+                  : isAnswered ? 'text-rose-700'
+                  : 'text-gray-700',
+                )}>
                   {i + 1}. {task.title || `Task ${i + 1}`}
                 </span>
                 <DiffBadge difficulty={task.difficulty ?? 'beginner'} />
@@ -477,9 +509,6 @@ function ResultsScreen({
           })}
         </div>
       </div>
-
-      {/* Feedback */}
-      <FeedbackForm courseId={courseId} contentTitle={courseTitle} accentColor="green" />
     </div>
   );
 }
@@ -498,12 +527,44 @@ export default function TasksViewerPage() {
   const [showTodo, setShowTodo] = useState(false);
   const [isDone, setIsDone] = useState(false);
 
+  // Reviews drawer state
+  const [showReviews, setShowReviews] = useState(false);
+  const [reviews, setReviews] = useState<FlashcardReview[]>([]);
+  const [reviewName, setReviewName] = useState('');
+  const [reviewComment, setReviewComment] = useState('');
+  const [reviewSubmitted, setReviewSubmitted] = useState(false);
+
   useEffect(() => {
-    dbGetCourse(id).then(c => {
+    async function load() {
+      const c = await dbGetCourse(id);
       setCourse(c);
       setLoading(false);
-    });
+      if (c) {
+        if (c.contentType === 'activities' && c.status === 'published') {
+          dbIncrementViews(id);
+        }
+        const r = await dbGetReviews(c.id);
+        setReviews(r);
+      }
+    }
+    load();
   }, [id]);
+
+  async function handleReviewSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!reviewComment.trim() || !course) return;
+    const saved = await dbAddReview({
+      courseId: course.id,
+      name: reviewName.trim() || 'Anonymous',
+      comment: reviewComment.trim().slice(0, 50),
+    });
+    if (saved) {
+      setReviews(prev => [saved, ...prev]);
+      setReviewName('');
+      setReviewComment('');
+      setReviewSubmitted(true);
+    }
+  }
 
   if (loading) {
     return (
@@ -516,21 +577,25 @@ export default function TasksViewerPage() {
   if (!course || course.contentType !== 'activities') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <p className="text-gray-500 mb-3">Practice set not found.</p>
-          <Link href="/dashboard" className="text-blue-600 text-sm underline">Back to dashboard</Link>
-        </div>
+        <p className="text-gray-500">Practice set not found.</p>
       </div>
     );
   }
 
   if (course.status !== 'published') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center max-w-sm mx-auto px-4">
-          <div className="text-4xl mb-3">🔒</div>
-          <h1 className="font-bold text-gray-900 mb-1">{course.title}</h1>
-          <p className="text-sm text-gray-500">These practice tasks haven&apos;t been published yet.</p>
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-slate-900 p-4 text-center">
+        <div className="max-w-md bg-white dark:bg-slate-800 rounded-2xl border border-gray-200 dark:border-slate-700 p-8 shadow-sm">
+          <div className="w-12 h-12 rounded-full bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto mb-4">
+            <Lock size={24} />
+          </div>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Content Unavailable</h2>
+          <p className="text-sm text-gray-500 dark:text-slate-400 mb-6">
+            This content is currently unpublished or set to draft mode by the creator.
+          </p>
+          <Link href="/" className="inline-flex items-center justify-center px-4 py-2 bg-blue-600 text-white font-medium text-sm rounded-lg hover:bg-blue-700 transition-colors">
+            Return Home
+          </Link>
         </div>
       </div>
     );
@@ -563,6 +628,7 @@ export default function TasksViewerPage() {
   function handleNext() {
     if (currentIdx >= allTasks.length - 1) {
       setIsDone(true);
+      dbIncrementCompletions(id);
     } else {
       setCurrentIdx(i => i + 1);
     }
@@ -594,18 +660,24 @@ export default function TasksViewerPage() {
       {/* Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-40">
         <div className="max-w-2xl mx-auto px-4 h-14 flex items-center gap-3">
-          <Link href="/dashboard"
-            className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-800 font-medium flex-shrink-0">
-            <ArrowLeft size={14} />
-          </Link>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-gray-800 truncate">{course.title}</p>
+            <p className="text-sm font-semibold text-gray-800 truncate">{cleanTitle(course.title)}</p>
             {!isDone && (
               <p className="text-xs text-gray-400">
                 {answeredIds.size} of {allTasks.length} answered
               </p>
             )}
           </div>
+          {/* Reviews button */}
+          <button
+            onClick={() => setShowReviews(true)}
+            className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-green-600 transition-colors flex-shrink-0">
+            <MessageSquare size={14} />
+            Reviews
+            {reviews.length > 0 && (
+              <span className="bg-green-100 text-green-700 px-1.5 rounded-full font-medium">{reviews.length}</span>
+            )}
+          </button>
           {/* To-do list button */}
           <button
             onClick={() => setShowTodo(true)}
@@ -651,10 +723,10 @@ export default function TasksViewerPage() {
         {isDone ? (
           <ResultsScreen
             tasks={allTasks}
-            completedIds={answeredIds}
+            correctIds={correctIds}
+            answeredIds={answeredIds}
             onRestart={restart}
             courseId={course.id}
-            courseTitle={course.title}
           />
         ) : (
           <>
@@ -691,6 +763,72 @@ export default function TasksViewerPage() {
           </>
         )}
       </div>
+
+      {/* Reviews drawer — same pattern as flashcards */}
+      {showReviews && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+          <div className="absolute inset-0 bg-black/30" onClick={() => setShowReviews(false)} />
+          <div className="relative bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-lg max-h-[80vh] overflow-y-auto shadow-xl">
+            <div className="sticky top-0 bg-white border-b border-gray-100 px-5 py-4 flex items-center justify-between">
+              <h2 className="text-base font-bold text-gray-900">Reviews</h2>
+              <button onClick={() => setShowReviews(false)} className="text-gray-400 hover:text-gray-600">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-5 space-y-5">
+              {/* Submit form */}
+              {reviewSubmitted ? (
+                <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-center">
+                  <p className="text-green-700 font-semibold text-sm">Thanks for your review!</p>
+                  <button onClick={() => setReviewSubmitted(false)} className="text-xs text-gray-500 underline mt-1">Leave another</button>
+                </div>
+              ) : (
+                <form onSubmit={handleReviewSubmit} className="bg-gray-50 rounded-xl p-4 space-y-3">
+                  <p className="text-sm font-semibold text-gray-700">Add a review</p>
+                  <input
+                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                    placeholder="Your name (optional)"
+                    value={reviewName}
+                    onChange={e => setReviewName(e.target.value)}
+                    maxLength={40}
+                  />
+                  <div>
+                    <textarea
+                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 min-h-[70px] resize-none"
+                      placeholder="Your comment (max 50 characters)"
+                      value={reviewComment}
+                      onChange={e => setReviewComment(e.target.value.slice(0, 50))}
+                      required
+                    />
+                    <p className="text-xs text-gray-400 text-right">{reviewComment.length}/50</p>
+                  </div>
+                  <button
+                    type="submit"
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700"
+                  >
+                    <Send size={13} /> Post Review
+                  </button>
+                </form>
+              )}
+
+              {/* Existing reviews */}
+              {reviews.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-4">No reviews yet. Be the first!</p>
+              ) : (
+                reviews.map(r => (
+                  <div key={r.id} className="border border-gray-100 rounded-xl p-4">
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="text-sm font-semibold text-gray-800">{r.name}</p>
+                      <p className="text-xs text-gray-400">{new Date(r.createdAt).toLocaleDateString()}</p>
+                    </div>
+                    <p className="text-sm text-gray-600">{r.comment}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

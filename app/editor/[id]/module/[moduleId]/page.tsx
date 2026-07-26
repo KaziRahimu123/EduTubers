@@ -6,9 +6,10 @@ import { ArrowLeft, Save, Plus, Trash2 } from 'lucide-react';
 import Layout from '@/components/Layout';
 import { dbGetCourse, dbSaveCourse, uid } from '@/lib/db';
 import type { Course, Module, Flashcard, QuizQuestion, PracticeTask } from '@/lib/types';
+import { cleanTitle } from '@/lib/cleanTitle';
 import RichNotesEditor, { RichField } from '@/components/RichNotesEditor';
 
-const TABS = ['Lesson', 'Flashcards', 'Quiz', 'Practice Tasks'];
+const TABS = ['Lesson', 'Flashcards', 'Quiz', 'Challenges'];
 const TAB_COLORS = ['border-blue-600 text-blue-700', 'border-purple-600 text-purple-700', 'border-orange-500 text-orange-700', 'border-green-600 text-green-700'];
 
 export default function ModuleEditorPage() {
@@ -62,7 +63,7 @@ export default function ModuleEditorPage() {
         </button>
         <div className="flex-1 min-w-0">
           <h1 className="text-xl font-bold text-gray-900 truncate">{mod.title}</h1>
-          <p className="text-xs text-gray-400">{course.title}</p>
+          <p className="text-xs text-gray-400">{cleanTitle(course.title)}</p>
         </div>
         <button onClick={() => dbSaveCourse(course!)} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"><Save size={13} /> Save</button>
       </div>
@@ -167,7 +168,7 @@ export default function ModuleEditorPage() {
         </div>
       )}
 
-      {/* Practice Tasks */}
+      {/* Challenges */}
       {tab === 3 && (
         <div>
           <div className="flex items-center justify-between mb-3">

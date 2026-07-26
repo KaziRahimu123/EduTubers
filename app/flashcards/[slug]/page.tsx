@@ -2,9 +2,10 @@
 
 import { useState, useEffect, useRef, Suspense } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { ChevronLeft, ChevronRight, RotateCcw, MessageSquare, Send, X, Lock } from 'lucide-react';
 import EduTubersLogo from '@/components/EduTubersLogo';
-import { dbGetCourseBySlug, dbGetReviews, dbAddReview, dbGetImages, uid } from '@/lib/db';
+import { dbGetCourseBySlug, dbGetReviews, dbAddReview, dbGetImages, dbIncrementViews, dbIncrementCompletions, uid } from '@/lib/db';
 import { decodePayload } from '@/lib/deckShare';
 import type { Flashcard, FlashcardReview } from '@/lib/types';
 import clsx from 'clsx';
@@ -109,7 +110,9 @@ function PublicFlashcardViewer() {
 
   const [deck, setDeck] = useState<DecodedDeck | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [isUnpublished, setIsUnpublished] = useState(false);
   const [current, setCurrent] = useState(0);
+  const [completionFired, setCompletionFired] = useState(false);
   const [showReviews, setShowReviews] = useState(false);
   const [reviews, setReviews] = useState<FlashcardReview[]>([]);
   const [reviewName, setReviewName] = useState('');
@@ -128,7 +131,10 @@ function PublicFlashcardViewer() {
         const cards: Flashcard[] = payload.cards.map((c, i) => ({ id: String(i), front: c.front, back: c.back, ...(c.image ? { image: c.image } : {}) }));
         setDeck({ title: payload.title, description: payload.description, colorful: payload.colorful, cards });
         const c = await dbGetCourseBySlug(slug);
-        if (c) setReviews(await dbGetReviews(c.id));
+        if (c) {
+          dbIncrementViews(c.id);
+          setReviews(await dbGetReviews(c.id));
+        }
         return;
       }
 
@@ -137,6 +143,8 @@ function PublicFlashcardViewer() {
       if (!c) { setNotFound(true); return; }
       const ct = c.contentType as string;
       if (ct !== 'review_cards' && ct !== 'flashcards') { setNotFound(true); return; }
+      if (c.status !== 'published') { setIsUnpublished(true); return; }
+      dbIncrementViews(c.id);
       const flat = c.modules.flatMap(m => m.flashcards);
       // Hydrate any images stored in the images table that aren't already on the card
       const storedImages = await dbGetImages(c.id);
@@ -150,13 +158,39 @@ function PublicFlashcardViewer() {
     load();
   }, [slug, searchParams]);
 
+  if (isUnpublished) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4 text-center">
+        <div className="max-w-md bg-white rounded-2xl border border-gray-200 p-8 shadow-sm">
+          <div className="w-12 h-12 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center mx-auto mb-4">
+            <Lock size={24} />
+          </div>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">Content Currently Unpublished</h2>
+          <p className="text-sm text-gray-500 mb-6">
+            This content is currently in draft mode. Click Publish in your studio editor to make it live.
+          </p>
+          <Link href="/dashboard" className="inline-flex items-center justify-center px-4 py-2 bg-purple-600 text-white font-medium text-sm rounded-lg hover:bg-purple-700">
+            Return to Dashboard
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   if (notFound) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <Lock size={40} className="mx-auto text-gray-300 mb-4" />
-          <h1 className="text-xl font-semibold text-gray-700 mb-2">Deck not found</h1>
-          <p className="text-sm text-gray-500">This flashcard deck doesn&apos;t exist or the link may be invalid.</p>
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4 text-center">
+        <div className="max-w-md bg-white rounded-2xl border border-gray-200 p-8 shadow-sm">
+          <div className="w-12 h-12 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center mx-auto mb-4">
+            <Lock size={24} />
+          </div>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">Deck not found</h2>
+          <p className="text-sm text-gray-500 mb-6">
+            This flashcard deck doesn&apos;t exist or the link may be invalid.
+          </p>
+          <Link href="/" className="inline-flex items-center justify-center px-4 py-2 bg-blue-600 text-white font-medium text-sm rounded-lg hover:bg-blue-700 transition-colors">
+            Return Home
+          </Link>
         </div>
       </div>
     );
@@ -173,7 +207,18 @@ function PublicFlashcardViewer() {
   const total = cards.length;
 
   function prev() { setCurrent(i => (i > 0 ? i - 1 : total - 1)); }
-  function next() { setCurrent(i => (i < total - 1 ? i + 1 : 0)); }
+  function next() {
+    const deckId = deck?.deckId;
+    setCurrent(i => {
+      const nextIdx = i < total - 1 ? i + 1 : 0;
+      // Fire completion when the visitor reaches the last card for the first time
+      if (nextIdx === total - 1 && !completionFired && deckId) {
+        dbIncrementCompletions(deckId);
+        setCompletionFired(true);
+      }
+      return nextIdx;
+    });
+  }
 
   async function handleReviewSubmit(e: React.FormEvent) {
     e.preventDefault();

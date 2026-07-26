@@ -8,6 +8,7 @@ import EduTubersLogo from '@/components/EduTubersLogo';
 import ProgressBar from '@/components/ProgressBar';
 import { dbGetCourse } from '@/lib/db';
 import type { Course } from '@/lib/types';
+import { cleanTitle } from '@/lib/cleanTitle';
 
 export default function PublicCoursePage() {
   const params = useParams();
@@ -58,7 +59,7 @@ export default function PublicCoursePage() {
             <span className="inline-flex px-2 py-0.5 bg-blue-50 text-blue-700 text-xs rounded-full font-medium capitalize">{course.learnerLevel}</span>
             <span className="inline-flex px-2 py-0.5 bg-gray-100 text-gray-500 text-xs rounded-full font-medium">{course.modules.length} modules</span>
           </div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">{course.title}</h1>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">{cleanTitle(course.title)}</h1>
           <p className="text-gray-500 leading-relaxed mb-4">{course.description}</p>
           {course.learningGoals.length > 0 && (
             <ul className="space-y-1">

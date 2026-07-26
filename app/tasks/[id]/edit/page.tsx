@@ -8,7 +8,7 @@ import {
   CheckCircle, ChevronDown, ChevronUp, Lightbulb, Settings2,
 } from 'lucide-react';
 import Layout from '@/components/Layout';
-import { dbGetCourse, dbSaveCourse, dbDeleteCourse, uid } from '@/lib/db';
+import { dbGetCourse, dbSaveCourse, dbDeleteCourse, dbProxy, uid } from '@/lib/db';
 import { RichField } from '@/components/RichNotesEditor';
 import type {
   Course, PracticeTask, PracticeTaskConfig,
@@ -263,7 +263,7 @@ export default function TasksEditorPage() {
   function addTask() {
     const modules = [...course!.modules];
     if (!modules.length) {
-      modules.push({ id: uid(), title: 'Practice Tasks', objective: '', lessonNotes: '', examples: '', flashcards: [], quizQuestions: [], practiceTasks: [] });
+      modules.push({ id: uid(), title: 'Interactive Challenges', objective: '', lessonNotes: '', examples: '', flashcards: [], quizQuestions: [], practiceTasks: [] });
     }
     const newTask: PracticeTask = {
       id: uid(),
@@ -283,8 +283,23 @@ export default function TasksEditorPage() {
     update({ modules });
   }
 
-  function togglePublish() {
-    update({ status: course!.status === 'published' ? 'draft' : 'published' });
+  async function togglePublish() {
+    if (!course) return;
+    const isPublishing = course.status !== 'published';
+    let slug = course.slug;
+    if (isPublishing && (!slug || slug.trim() === '')) {
+      const res = await dbProxy<{ slug: string }>('make_slug', { title: course.title, existingCourseId: course.id });
+      slug = res?.slug ?? course.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 60);
+    }
+    const updated: Course = {
+      ...course,
+      status: isPublishing ? 'published' : 'draft',
+      slug,
+    };
+    setCourse(updated);
+    await dbSaveCourse(updated);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
   }
 
   // ── Difficulty counts for the strip ──────────────────────────────────────
@@ -352,7 +367,7 @@ export default function TasksEditorPage() {
         <div className="bg-green-50 border border-green-200 rounded-xl p-3 mb-4 flex items-center gap-3 text-sm">
           <Globe size={14} className="text-green-600 flex-shrink-0" />
           <div className="flex-1 min-w-0">
-            <p className="text-green-800 font-medium">Practice Tasks are live</p>
+            <p className="text-green-800 font-medium">Interactive Challenges are live</p>
             <p className="text-xs text-green-600 truncate">
               {typeof window !== 'undefined' ? `${window.location.origin}/tasks/${id}` : `/tasks/${id}`}
             </p>

@@ -1,105 +1,152 @@
-# EduTubers
+![EduTubers Banner](./public/edutubers-white-banner.png)
 
-**Turn passive content into active learning.**
+# EDUTUBERS
 
-EduTubers transforms videos, transcripts, articles, and notes into editable interactive mini-courses — with flashcards, quizzes, practice tasks, analytics, and export options. Powered by OpenAI.
+**Turn your content into interactive audience experiences.**
 
----
+EduTubers is a full-source content intelligence platform built for YouTubers, podcasters, newsletter writers, and digital creators. When a creator uploads a video, audio, podcast, PDF document, or transcript (up to 3 files simultaneously), EduTubers processes the material using a hybrid pipeline of IBM Granite 3.0 (128K context via watsonx.ai) and OpenAI without tail-end truncation, dynamically generating 5 audience-ready formats (Flashcard Decks, Audience Quizzes, Interactive Challenges, Content Guides, and Illustrated Explainers) in seconds, complete with audience response tracking and AI-generated creator action plans.
 
-## Tech Stack
+Built for the IBM AI Builders Challenge (July 2026 / Creative Industries & AI).
 
-| Technology | Role |
-|------------|------|
-| **Next.js 15** (App Router) | React framework — routing, SSR, API routes |
-| **Node.js** | Runtime for Next.js API routes (server-side OpenAI calls) |
-| **React 19** | UI component library |
-| **TypeScript** | Type safety across the full app |
-| **Tailwind CSS v4** | Utility-first styling |
-| **OpenAI API** | GPT-5.x course generation (called server-side via API route) |
-| **localStorage** | Client-side data persistence — no database needed |
-
-> **No Python required.** Node.js API routes handle all server-side logic including the OpenAI call. The API key is never exposed to the browser.
+[Watch the 3-minute demo](https://youtube.com) · [Try the live demo](https://edutubers.com) · [Judge's Quick Guide](./JUDGE.md)
 
 ---
 
-## Architecture
+## At a glance
 
-```
-Browser (React)
-    │
-    │  POST /api/generate  (with content + key)
-    ▼
-Next.js API Route  ──►  OpenAI API
-(Node.js server)         (GPT-5.x)
-    │
-    ▼
-Returns structured Course JSON
-    │
-    ▼
-Browser saves to localStorage
-```
-
-The OpenAI API key travels only from the browser to the Next.js server — it is **never bundled in client code**.
+| Section | Description |
+| :--- | :--- |
+| **What** | Ingests full-length videos, podcasts, PDFs, and articles (up to 3 files / 100 MB) and generates 5 active-recall learning formats (Flashcard Decks, Audience Quizzes, Practice Tasks, Content Guides, and Illustrated Explainers) in under 45 seconds. |
+| **Why it's different** | Standard AI tools truncate long media past 10 minutes and output static, read-only text summaries. EduTubers processes full-length multi-file sources without truncation and provides built-in studio editors so creators can manually edit every card, question, or task before publishing. |
+| **Who it's for** | Content creators, YouTubers, podcasters, and newsletter writers in the Creative Industries who want to convert passive audience consumption into active recall experiences. |
+| **Full-source, not truncated** | Ingests up to 3 files simultaneously across IBM Granite 3.0's 128K context window on watsonx.ai. Every concept from the beginning, middle, and end of long content is captured with zero tail-end drop-off. |
+| **Hybrid AI Architecture** | Leverages IBM Granite 3.0 (20B, 128K context window via watsonx.ai) for full-source transcript ingestion and topic blueprinting, paired with OpenAI for structured asset generation. |
+| **Creator Editing Autonomy** | Zero locked AI outputs. Every generated flashcard, quiz question, choice, explanation, practice task, and content guide is 100% editable in custom built-in studio editors before publishing. |
+| **Built with** | **IBM Granite 3.0 (watsonx.ai)** · **OpenAI** · **Next.js 16** · **Supabase (PostgreSQL)** · **Auth0** · **Tailwind CSS v4** · **TypeScript** |
 
 ---
 
-## Pages
+## The problem
 
-| Route | Page |
-|-------|------|
-| `/` | Landing page |
-| `/generate` | Course Generator |
-| `/dashboard` | Creator Dashboard |
-| `/editor/[id]` | Course Editor |
-| `/editor/[id]/module/[moduleId]` | Module Editor |
-| `/analytics/[id]` | Analytics |
-| `/export/[id]` | Export & Publish |
-| `/course/[id]` | Public Course Overview |
-| `/course/[id]/module/[moduleId]` | Public Module (lesson, flashcards, quiz, tasks) |
-| `/course/[id]/feedback` | Feedback & Reviews |
+When creators publish long-form tutorials, lectures, or podcasts, their audience consumes them passively. Viewers experience an "illusion of competence" while watching, yet forget over 70% of the material within 24 hours without active testing. Meanwhile, creators receive view counts and watch time that offer zero visibility into what viewers actually understood. Existing AI summary tools silently cut off long videos after the first 10 minutes and output flat text summaries rather than interactive learning assets. The source knowledge exists, but no platform ingests full-length media files to generate active-recall experiences in seconds. EduTubers adds that layer. It complements video platforms and content workflows, it does not replace them.
 
 ---
 
-## Getting Started
+## 4. The solution
 
-### Prerequisites
-- Node.js 18+
-- An OpenAI API key (get one free at [platform.openai.com](https://platform.openai.com))
+EduTubers is a full-source content intelligence platform that transforms long-form media—such as YouTube videos, podcasts, articles, and PDFs—into interactive, high-retention audience experiences. By combining IBM Granite 3.0’s 128K context window via watsonx.ai with OpenAI asset generation, EduTubers ingests up to 3 media files simultaneously without tail-end truncation, dynamically building 5 active-recall learning formats (Flashcard Decks, Audience Quizzes, Practice Tasks, Content Guides, and Illustrated Explainers) in under 45 seconds. Creators retain 100% editing control through built-in studio editors before sharing custom public links, while audience quiz attempts feed directly into creator analytics to track comprehension and generate actionable follow-up video scripts.
 
-### Install & Run
+### The Complete EduTubers Workflow
 
-```bash
-cd EduTubers
-npm install
-npm run dev
+```text
+Creator uploads content (PDFs, Audio, Video up to 3 files / 100 MB)
+                           │
+                           ▼
+Content is extracted & analyzed (IBM Granite 3.0 128K full-source blueprint)
+                           │
+                           ▼
+AI generates structured audience content (5 active-recall formats via OpenAI)
+                           │
+                           ▼
+Creator edits branding and content (Built-in studio editors for 100% control)
+                           │
+                           ▼
+Each experience receives a public link (Instant shareable URL for audience)
+                           │
+                           ▼
+Audience interacts & gives feedback (Quiz attempts & performance insights)
 ```
 
-Open [http://localhost:3000](http://localhost:3000)
+---
 
-### Build for production
+## What makes it different
 
-```bash
-npm run build
-npm start
+Unlike traditional AI tools that produce static, uneditable summaries, EduTubers introduces a complete, creator-first workflow built on three unique capabilities:
+
+- **Closed-Loop Audience Feedback:** Most AI generators leave creators in the dark after content is published. EduTubers automatically captures live audience quiz attempts, ranking missed questions and running IBM Granite to generate actionable follow-up video scripts for creators.
+- **Built-in Studio Editors:** Standard AI tools return read-only text that cannot be modified. EduTubers features dedicated in-browser editors for every format, letting creators manually edit, add, or fine-tune any card, question, choice, or practice task before sharing.
+- **Multi-Source 128K Ingestion:** While standard tools process single files and truncate content after 10 minutes, EduTubers ingests up to 3 files simultaneously (PDFs, audio, or video up to 100 MB) across IBM Granite 3.0's 128K context window with zero tail-end drop-off.
+
+---
+
+## Technical Architecture
+
+```mermaid
+flowchart TD
+    subgraph Client ["Client Layer (Next.js 16 App Router & React 19)"]
+        UI["Tailwind CSS v4 & Lucide Icons UI"]
+        Auth0Client["Auth0 Session & Cookie Auth"]
+        Editors["In-Browser Studio Editors (Quizzes, Flashcards, Tasks, Guides)"]
+    end
+
+    subgraph API ["Serverless API Gateway (Node.js / Next.js 16)"]
+        TranscribeRoute["/api/transcribe (ffmpeg-static + Whisper-1)"]
+        ExtractPdfRoute["/api/extract-pdf (pdf-parse)"]
+        GenerateRoute["/api/generate (Hybrid Generation Controller)"]
+        AnalyticsRoute["/api/analytics-insights (IBM Granite 3.0 Action Plan)"]
+        DBRoute["/api/db (Authenticated Supabase Proxy)"]
+        UploadImgRoute["/api/upload-image (Supabase Storage Uploader)"]
+    end
+
+    subgraph AI ["Hybrid AI & Inference Pipeline"]
+        Granite["IBM Granite 3.0 20B (watsonx.ai 128K Context Blueprint)"]
+        OpenAIModel["OpenAI Asset Engine"]
+    end
+
+    subgraph Storage ["Persistence & Storage"]
+        SupabaseDB[("Supabase PostgreSQL DB (RLS Enforced)")]
+        SupabaseStorage["Supabase Storage Buckets (Images & Media)"]
+    end
+
+    UI --> Auth0Client
+    UI --> TranscribeRoute
+    UI --> ExtractPdfRoute
+    UI --> GenerateRoute
+    UI --> AnalyticsRoute
+    GenerateRoute --> Granite
+    Granite -->|Full-Source 128K Blueprint| OpenAIModel
+    OpenAIModel -->|Structured Formats| DBRoute
+    DBRoute --> SupabaseDB
+    UploadImgRoute --> SupabaseStorage
 ```
 
-### API Key
+### Architecture Breakdown
 
-Paste your OpenAI key in the **Course Generator** page. It's stored in your browser's `localStorage` and sent only to the Next.js API route — never to any third-party server.
+- **Application & Session Layer:** Built on Next.js 16 (App Router) and React 19 with TypeScript and Tailwind CSS v4. User authentication and API session security are enforced server-side via Auth0 (`@auth0/nextjs-auth0`).
+- **Media Ingestion & Processing:** Media files (audio MP3/WAV, video MP4/WebM) are processed at `/api/transcribe` using `ffmpeg-static` and `fluent-ffmpeg` before calling OpenAI Whisper-1 via native multipart streams. Document files (PDFs) are extracted at `/api/extract-pdf` using `pdf-parse`.
+- **Two-Stage Hybrid AI Pipeline:** Generation is coordinated at `/api/generate`: Stage 1 (IBM Granite 3.0 20B via watsonx.ai) ingests full-source transcripts across IBM Granite's 128K context window, extracting a complete topic blueprint with zero tail-end truncation. Stage 2 (OpenAI Generation Engine) receives Granite's blueprint and generates 5 structured active-recall formats with full autonomous density allocation.
+- **Database & Asset Persistence:** All course records, quiz attempts, and user assets are stored in Supabase PostgreSQL via an authenticated REST proxy (`/api/db`) with strict Row-Level Security (RLS). AI-generated images are stored in Supabase Storage via `/api/upload-image`.
+- **Quiz Analytics & AI Creator Action Plan:** Audience quiz attempt results are logged in Supabase. The `/api/analytics-insights` endpoint ranks missed questions from most-wrong to least-wrong and invokes IBM Granite 3.0 (20B) on watsonx.ai to generate a targeted 60-Second Video Recap Script for the creator.
 
 ---
 
 ## How IBM Bob Was Used
 
-**IBM Bob** designed and built the entire application:
+IBM Bob was utilized as an AI pair programmer and systems architect throughout the complete development lifecycle of EduTubers:
 
-1. **Architecture** — Designed the Next.js App Router structure, Node.js API route for server-side OpenAI calls, and localStorage data layer
-2. **API Route** — Built the `/api/generate` Node.js endpoint that takes transcript + options, calls OpenAI GPT-5.x, hydrates IDs, and returns a structured Course object
-3. **All pages** — Landing, Generator, Dashboard, Editor, Module Editor, Public Course, Public Module (with colourful flashcards/quiz/tasks), Feedback, Analytics, Export
-4. **AI Prompt Engineering** — Wrote the detailed prompt that instructs the AI to base all content on the actual transcript, not generic placeholders
-5. **Tech migration** — Migrated from Vite/React SPA to Next.js 15 with full App Router structure
-6. **README** — Authored this file
+- **Hybrid Pipeline Architecture:** Designed the two-stage AI architecture—using IBM Granite 3.0 (20B) on watsonx.ai for 128K full-source transcript ingestion and topic blueprinting paired with structured asset engines.
+- **API & Network Hardening:** Hardened serverless REST proxy endpoints (`/api/db`), resolved database unique slug key collisions server-side, and optimized Whisper multipart stream handlers to eliminate TLS record errors.
+- **Studio Editor Engineering:** Refactored built-in in-browser studio editors for all 5 formats (Flashcard Decks, Audience Quizzes, Practice Tasks, Content Guides, and Illustrated Explainers), giving creators 100% manual editing control.
+- **Closed-Loop Analytics Engine:** Built the quiz response performance ranker and automated the IBM Granite 60-Second Video Recap Script generator in `/api/analytics-insights`.
 
 ---
 
-## Made with IBM Bob
+## Develop
+
+```bash
+# 1. Clone the repository & navigate to workspace
+git clone https://github.com/TasinKazi/The-Bob-Effect.git
+cd The-Bob-Effect
+
+# 2. Configure local environment variables
+cp .env.example .env.local
+
+# 3. Install dependencies & start the local Next.js 16 dev server
+npm install && npm run dev
+```
+
+---
+
+## License
+
+This project is licensed under the Apache 2.0 License - see the [LICENSE](LICENSE) file for details.

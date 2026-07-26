@@ -3,8 +3,9 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { CheckCircle, XCircle, RotateCcw, ChevronRight, ChevronLeft, Download, ArrowLeft } from 'lucide-react';
-import { dbGetCourse, dbSaveQuizAttempt, dbCountQuizAttempts, uid } from '@/lib/db';
+import { CheckCircle, XCircle, RotateCcw, ChevronRight, ChevronLeft, Download, Lock } from 'lucide-react';
+import { dbGetCourse, dbSaveQuizAttempt, dbCountQuizAttempts, dbIncrementViews, dbIncrementCompletions, uid } from '@/lib/db';
+import { cleanTitle } from '@/lib/cleanTitle';
 import ProgressBar from '@/components/ProgressBar';
 import MathText from '@/components/MathText';
 import FeedbackForm from '@/components/FeedbackForm';
@@ -82,7 +83,8 @@ export default function QuizTakerPage() {
     async function load() {
       const c = await dbGetCourse(id);
       setCourse(c);
-      if (c?.contentType === 'quiz') {
+      if (c?.contentType === 'quiz' && c.status === 'published') {
+        dbIncrementViews(id);
         const count = await dbCountQuizAttempts(id);
         setAttemptsUsed(count);
 
@@ -112,21 +114,25 @@ export default function QuizTakerPage() {
   if (!course || course.contentType !== 'quiz') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <p className="text-gray-500 mb-3">Quiz not found.</p>
-          <Link href="/dashboard" className="text-blue-600 text-sm underline">Back to dashboard</Link>
-        </div>
+        <p className="text-gray-500">Quiz not found.</p>
       </div>
     );
   }
 
   if (course.status !== 'published') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center max-w-sm mx-auto px-4">
-          <div className="text-4xl mb-3">🔒</div>
-          <h1 className="font-bold text-gray-900 mb-1">{course.title}</h1>
-          <p className="text-sm text-gray-500">This quiz hasn&apos;t been published yet.</p>
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-slate-900 p-4 text-center">
+        <div className="max-w-md bg-white dark:bg-slate-800 rounded-2xl border border-gray-200 dark:border-slate-700 p-8 shadow-sm">
+          <div className="w-12 h-12 rounded-full bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto mb-4">
+            <Lock size={24} />
+          </div>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Content Unavailable</h2>
+          <p className="text-sm text-gray-500 dark:text-slate-400 mb-6">
+            This content is currently unpublished or set to draft mode by the creator.
+          </p>
+          <Link href="/" className="inline-flex items-center justify-center px-4 py-2 bg-blue-600 text-white font-medium text-sm rounded-lg hover:bg-blue-700 transition-colors">
+            Return Home
+          </Link>
         </div>
       </div>
     );
@@ -140,7 +146,7 @@ export default function QuizTakerPage() {
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center max-w-sm mx-auto px-4">
           <div className="text-4xl mb-3">⏳</div>
-          <h1 className="font-bold text-gray-900 mb-1">{course.title}</h1>
+          <h1 className="font-bold text-gray-900 mb-1">{cleanTitle(course.title)}</h1>
           <p className="text-sm text-gray-500">The creator hasn&apos;t published answers yet. Check back soon.</p>
         </div>
       </div>
@@ -195,6 +201,7 @@ export default function QuizTakerPage() {
       attemptNumber: attemptsUsed + 1,
     };
     await dbSaveQuizAttempt(attempt);
+    dbIncrementCompletions(id);
     setSubmitted(true);
     setCurrentIdx(0);
   }
@@ -233,11 +240,8 @@ export default function QuizTakerPage() {
       {/* Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-40">
         <div className="max-w-2xl mx-auto px-4 h-14 flex items-center gap-3">
-          <Link href="/dashboard" className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-800 font-medium">
-            <ArrowLeft size={14} />
-          </Link>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-gray-800 truncate">{course.title}</p>
+            <p className="text-sm font-semibold text-gray-800 truncate">{cleanTitle(course.title)}</p>
             {!submitted && <p className="text-xs text-gray-400">{currentIdx + 1} of {allQuestions.length}</p>}
           </div>
           <a href={`/api/quiz-pdf/${id}`} target="_blank" rel="noopener"

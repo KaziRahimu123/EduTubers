@@ -5,11 +5,12 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { ArrowLeft, Copy, Download, Globe, Check, Printer, Share2, FileText, Code } from 'lucide-react';
 import Layout from '@/components/Layout';
-import { dbGetCourse, dbSaveCourse } from '@/lib/db';
+import { dbGetCourse, dbSaveCourse, dbMakeSlug } from '@/lib/db';
 import type { Course } from '@/lib/types';
+import { cleanTitle } from '@/lib/cleanTitle';
 
 function toMarkdown(course: Course): string {
-  const lines = [`# ${course.title}`, '', course.description, '', `**Level:** ${course.learnerLevel}`, '', '## Goals', ...course.learningGoals.map(g => `- ${g}`), ''];
+  const lines = [`# ${cleanTitle(course.title)}`, '', course.description, '', `**Level:** ${course.learnerLevel}`, '', '## Goals', ...course.learningGoals.map(g => `- ${g}`), ''];
   course.modules.forEach((mod, i) => {
     lines.push(`## Module ${i + 1}: ${mod.title}`, '', `**Objective:** ${mod.objective}`, '', mod.lessonNotes, '');
     mod.flashcards.forEach(f => lines.push(`- **${f.front}** — ${f.back}`));
@@ -38,15 +39,26 @@ export default function ExportPage() {
     const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([content], { type })), download: filename });
     a.click(); URL.revokeObjectURL(a.href);
   }
-  function togglePublish() {
-    const updated: Course = { ...course!, status: course!.status === 'published' ? 'draft' : 'published' };
-    dbSaveCourse(updated); setCourse(updated);
+  async function togglePublish() {
+    if (!course) return;
+    const isPublishing = course.status !== 'published';
+    let slug = course.slug;
+    if (isPublishing && !slug) {
+      slug = await dbMakeSlug(cleanTitle(course.title), course.id);
+    }
+    const updated: Course = {
+      ...course,
+      status: isPublishing ? 'published' : 'draft',
+      slug: isPublishing ? slug : undefined,
+    };
+    setCourse(updated);
+    await dbSaveCourse(updated);
   }
 
   const md = toMarkdown(course);
   const json = JSON.stringify(course, null, 2);
   const slug = `${typeof window !== 'undefined' ? window.location.origin : ''}/course/${course.id}`;
-  const sharePack = `📚 ${course.title}\n\n${course.description}\n\nWhat you'll learn:\n${course.learningGoals.map(g => `• ${g}`).join('\n')}\n\n${course.shareText}`;
+  const sharePack = `📚 ${cleanTitle(course.title)}\n\n${course.description}\n\nWhat you'll learn:\n${course.learningGoals.map(g => `• ${g}`).join('\n')}\n\n${course.shareText}`;
 
   const CopyBtn = ({ text, label }: { text: string; label: string }) => (
     <button onClick={() => copy(text, label)} className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600">

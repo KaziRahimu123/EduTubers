@@ -96,7 +96,7 @@ function QuizViewer({ mod }: { mod: Module }) {
     <div className="space-y-5">
       {submitted && (
         <div className={`rounded-xl p-5 border-2 ${pct === 100 ? 'bg-green-50 border-green-300' : pct >= 60 ? 'bg-blue-50 border-blue-300' : 'bg-orange-50 border-orange-300'}`}>
-          <p className="font-bold text-lg text-gray-900">{pct === 100 ? '🎉 Perfect score!' : pct >= 60 ? '✅ Good work!' : '📚 Keep studying!'}</p>
+          <p className="font-bold text-lg text-gray-900">{pct === 100 ? '🎉 Perfect score!' : pct >= 60 ? '✅ Good work!' : '💪 Keep going!'}</p>
           <p className="text-sm text-gray-600 mt-1 mb-3">You got {score} out of {questions.length} correct ({pct}%)</p>
           <ProgressBar value={score} max={questions.length} color={pct >= 80 ? 'bg-green-500' : pct >= 60 ? 'bg-blue-500' : 'bg-orange-500'} />
           <button onClick={reset} className="mt-3 inline-flex items-center gap-1 text-xs text-gray-600 hover:text-gray-900"><RotateCcw size={12} /> Retake quiz</button>
@@ -152,14 +152,14 @@ function QuizViewer({ mod }: { mod: Module }) {
   );
 }
 
-// ── Practice tasks viewer ─────────────────────────────────────────────────────
+// ── Interactive challenges viewer ─────────────────────────────────────────────
 
 function TasksViewer({ mod }: { mod: Module }) {
   const tasks = mod.practiceTasks ?? [];
   const [responses, setResponses] = useState<string[]>(tasks.map(() => ''));
   const [revealed, setRevealed] = useState<boolean[]>(tasks.map(() => false));
 
-  if (!tasks.length) return <p className="text-gray-400 text-sm text-center py-12">No practice tasks in this module.</p>;
+  if (!tasks.length) return <p className="text-gray-400 text-sm text-center py-12">No interactive challenges in this module.</p>;
 
   return (
     <div className="space-y-5">
@@ -197,7 +197,7 @@ function TasksViewer({ mod }: { mod: Module }) {
 
 // ── Tab bar ───────────────────────────────────────────────────────────────────
 
-const TABS = ['Lesson', 'Flashcards', 'Quiz', 'Practice Tasks'];
+const TABS = ['Lesson', 'Flashcards', 'Quiz', 'Challenges'];
 const TAB_COLORS = ['text-blue-700 border-blue-600', 'text-purple-700 border-purple-600', 'text-orange-700 border-orange-600', 'text-green-700 border-green-600'];
 
 // ── Main page ─────────────────────────────────────────────────────────────────

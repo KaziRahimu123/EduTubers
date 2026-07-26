@@ -8,6 +8,7 @@ import Layout from '@/components/Layout';
 import { dbGetCourse, dbSaveCourse, dbDeleteCourse, uid } from '@/lib/db';
 import type { Course, Flashcard, QuizQuestion, PracticeTask } from '@/lib/types';
 import { RichField } from '@/components/RichNotesEditor';
+import { cleanTitle } from '@/lib/cleanTitle';
 
 export default function EditorPage() {
   const params = useParams();
@@ -149,7 +150,7 @@ export default function EditorPage() {
                 value={course.title} onChange={e => update({ title: e.target.value })} onBlur={() => setEditingTitle(false)} />
             ) : (
               <h1 className="text-2xl font-bold text-gray-900 cursor-pointer hover:text-blue-600 transition-colors"
-                onClick={() => setEditingTitle(true)} title="Click to edit">{course.title}</h1>
+                onClick={() => setEditingTitle(true)} title="Click to edit">{cleanTitle(course.title)}</h1>
             )}
             <p className="text-xs text-gray-400 mt-0.5 capitalize">{course.learnerLevel}</p>
           </div>
@@ -246,11 +247,11 @@ export default function EditorPage() {
         </div>
       )}
 
-      {/* ── Practice Tasks ───────────────────────────────────────────────────── */}
+      {/* ── Interactive Challenges ───────────────────────────────────────────── */}
       {(contentTypeStr === 'tasks' || contentTypeStr === 'activities') && (
         <div className="mb-6">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-base font-semibold text-gray-900">Practice Tasks
+            <h2 className="text-base font-semibold text-gray-900">Interactive Challenges
               <span className="ml-2 text-xs font-normal text-gray-400">{allTasks.length} tasks</span>
             </h2>
             <button onClick={addTask} className="inline-flex items-center gap-1 px-3 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600">
@@ -276,10 +277,10 @@ export default function EditorPage() {
         </div>
       )}
 
-      {/* ── Study Pack Content ──────────────────────────────────────────────────── */}
+      {/* ── Content Guide Sections ──────────────────────────────────────────── */}
       {(contentTypeStr === 'pdf_pack' || contentTypeStr === 'branded_guide') && (
         <div className="mb-6 space-y-4">
-          <h2 className="text-base font-semibold text-gray-900">Study Pack Content</h2>
+          <h2 className="text-base font-semibold text-gray-900">Content Guide Sections</h2>
           {course.modules.map((mod, mi) => (
             <div key={mod.id} className="bg-white rounded-xl border border-gray-200 p-4">
               <input className={`${inp} mb-3 font-semibold`} value={mod.title}

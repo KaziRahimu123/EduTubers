@@ -14,17 +14,29 @@ import {
   CONTENT_TYPES, GENERATION_LIMIT_PER_3_DAYS,
 } from '@/lib/types';
 import { useAuthGuard } from '@/lib/useAuthGuard';
-import { Zap, Upload, FileText, Mic, Video, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { Zap, Upload, FileText, Mic, Video, X, ChevronDown, ChevronUp, Layers } from 'lucide-react';
 
-const MAX_FILE_MB = 100;
-const MAX_MEDIA_MB = 100; // server chunks large files for Whisper
+// ── Constants ────────────────────────────────────────────────────────────────
+
+const MAX_FILES       = 3;
+const MAX_TOTAL_MB    = 100;
+const MAX_TOTAL_BYTES = MAX_TOTAL_MB * 1024 * 1024;
+
+const ALLOWED_AUDIO_TYPES = new Set([
+  'audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/webm',
+  'audio/ogg', 'audio/flac', 'audio/x-flac',
+]);
+const ALLOWED_VIDEO_TYPES = new Set([
+  'video/mp4', 'video/quicktime', 'video/webm',
+  'video/mpeg', 'video/x-msvideo',
+]);
 
 const DEFAULT_TASK_CONFIG: PracticeTaskConfig = {
   taskCount: 'ai', learnerLevel: 'beginner', difficulty: 'mixed',
   includeHints: true, showAnswerTiming: 'after_submission', showAnswers: true,
 };
 
-const TASK_COUNTS = [4, 6, 8, 10, 15] as const;
+const TASK_COUNTS = [4, 6, 8, 10, 15] as const;  // human-selectable preset counts (max custom = 15)
 
 const DEFAULT_QUIZ_CONFIG: QuizConfig = {
   quizTitle: '', targetAudience: 'beginner', questionCount: 'ai',
@@ -38,12 +50,36 @@ const DEFAULT_QUIZ_CONFIG: QuizConfig = {
   },
 };
 
-const QUESTION_COUNTS = [5, 10, 15, 20] as const;
+const QUESTION_COUNTS = [5, 10, 15, 20, 25] as const;
 const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
   multiple_choice: 'Multiple Choice',
   true_false:      'True / False',
   multiple_select: 'Multiple Select',
 };
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024)          return `${bytes} B`;
+  if (bytes < 1024 * 1024)   return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function fileTypeLabel(mime: string): string {
+  if (mime === 'application/pdf')        return 'PDF';
+  if (mime.startsWith('audio/'))         return 'Audio';
+  if (mime.startsWith('video/'))         return 'Video';
+  return 'File';
+}
+
+function FileTypeIcon({ mime, size = 16 }: { mime: string; size?: number }) {
+  if (mime === 'application/pdf')   return <FileText size={size} className="text-red-500 flex-shrink-0" />;
+  if (mime.startsWith('audio/'))    return <Mic size={size} className="text-purple-500 flex-shrink-0" />;
+  if (mime.startsWith('video/'))    return <Video size={size} className="text-blue-500 flex-shrink-0" />;
+  return <FileText size={size} className="text-gray-400 flex-shrink-0" />;
+}
+
+// ── Sub-components ───────────────────────────────────────────────────────────
 
 function Toggle({ on, onToggle, disabled }: { on: boolean; onToggle: () => void; disabled?: boolean }) {
   return (
@@ -58,29 +94,33 @@ function Toggle({ on, onToggle, disabled }: { on: boolean; onToggle: () => void;
   );
 }
 
-type InputMode = 'text' | 'pdf' | 'audio' | 'video';
-type MediaStatus = 'idle' | 'uploading' | 'transcribing' | 'done' | 'error';
+// ── Types ────────────────────────────────────────────────────────────────────
+
+type FileStatus = 'idle' | 'processing' | 'done' | 'error';
+
+interface UploadedFile {
+  file: File;
+  status: FileStatus;
+  error: string;
+  extractedText: string;
+}
 
 export default function Generator() {
-  const router = useRouter();
-  const ready = useAuthGuard();
-  const fileRef = useRef<HTMLInputElement>(null);
-  const mediaRef = useRef<HTMLInputElement>(null);
+  const router   = useRouter();
+  const ready    = useAuthGuard();
+  const dropRef  = useRef<HTMLInputElement>(null);
+
   const [contentType, setContentType] = useState<ContentType | null>(null);
-  const [inputMode, setInputMode] = useState<InputMode>('text');
-  const [transcript, setTranscript] = useState('');
+  const [transcript,  setTranscript]  = useState('');
   const [supplemental, setSupplemental] = useState('');
   const [showSupplemental, setShowSupplemental] = useState(false);
 
-  // File state
-  const [pdfFile, setPdfFile] = useState<File | null>(null);
-  const [pdfError, setPdfError] = useState('');
-  const [pdfPageCount, setPdfPageCount] = useState<number | null>(null);
-  const [mediaFile, setMediaFile] = useState<File | null>(null);
-  const [mediaStatus, setMediaStatus] = useState<MediaStatus>('idle');
-  const [mediaError, setMediaError] = useState('');
+  // ── Multi-file state ──────────────────────────────────────────────────────
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [fileError,     setFileError]     = useState('');
+  const [dragOver,      setDragOver]      = useState(false);
 
-  // Options
+  // ── Options ───────────────────────────────────────────────────────────────
   const [options, setOptions] = useState<Omit<GeneratorOptions, 'contentType'>>({
     learnerLevel: 'beginner',
     quizDifficulty: 'medium',
@@ -93,20 +133,24 @@ export default function Generator() {
     cardCount: 'ai', colorful: false, includeImages: false,
   });
 
-  const [quizConfig, setQuizConfig] = useState<QuizConfig>(DEFAULT_QUIZ_CONFIG);
+  const [quizConfig,        setQuizConfig]        = useState<QuizConfig>(DEFAULT_QUIZ_CONFIG);
   const [showFeedbackPanel, setShowFeedbackPanel] = useState(false);
-  const [customCount, setCustomCount] = useState(false);
+  const [customCount,       setCustomCount]       = useState(false);
 
-  const [taskConfig, setTaskConfig] = useState<PracticeTaskConfig>(DEFAULT_TASK_CONFIG);
+  const [taskConfig,      setTaskConfig]      = useState<PracticeTaskConfig>(DEFAULT_TASK_CONFIG);
   const [customTaskCount, setCustomTaskCount] = useState(false);
 
   const [generateImages, setGenerateImages] = useState(false);
 
-  const [userId, setUserId]   = useState<string | null>(null);
-  const [genUsed, setGenUsed] = useState(0);
+  const [userId,     setUserId]     = useState<string | null>(null);
+  const [genUsed,    setGenUsed]    = useState(0);
   const [generating, setGenerating] = useState(false);
-  const [error, setError]               = useState('');
-  const [dragOver, setDragOver]         = useState(false);
+  const [error,      setError]      = useState('');
+
+  // Whether any file is still being processed
+  const isProcessing = uploadedFiles.some(f => f.status === 'processing');
+
+  // ── Auth / quota ─────────────────────────────────────────────────────────
 
   useEffect(() => {
     if (!ready) return;
@@ -116,199 +160,159 @@ export default function Generator() {
         dbGetGenUsed3Days().then(setGenUsed);
       }
     });
-
-    // Re-fetch quota whenever the tab regains focus (e.g. after navigating back)
     function onFocus() { dbGetGenUsed3Days().then(setGenUsed); }
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, [ready]);
 
-  // ── Drag-and-drop helpers ────────────────────────────────────────────────
+  // ── Drag-and-drop ─────────────────────────────────────────────────────────
 
   function onDragOver(e: React.DragEvent) { e.preventDefault(); setDragOver(true); }
-  function onDragLeave(e: React.DragEvent) { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(false); }
-  function onDragEnd() { setDragOver(false); }
-
-  async function handleFileDropped(file: File) {
-    setDragOver(false);
-    if (inputMode === 'pdf') {
-      // Synthesise a ChangeEvent-like object the existing handler can consume
-      const dt = new DataTransfer();
-      dt.items.add(file);
-      const fakeInput = document.createElement('input');
-      fakeInput.type = 'file';
-      Object.defineProperty(fakeInput, 'files', { value: dt.files });
-      await handlePdfUpload({ target: fakeInput } as unknown as ChangeEvent<HTMLInputElement>);
-    } else {
-      // audio / video — same approach
-      const dt = new DataTransfer();
-      dt.items.add(file);
-      const fakeInput = document.createElement('input');
-      fakeInput.type = 'file';
-      Object.defineProperty(fakeInput, 'files', { value: dt.files });
-      await handleMediaUpload({ target: fakeInput } as unknown as ChangeEvent<HTMLInputElement>);
-    }
+  function onDragLeave(e: React.DragEvent) {
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(false);
   }
+  function onDragEnd() { setDragOver(false); }
 
   async function onDrop(e: React.DragEvent) {
     e.preventDefault();
     setDragOver(false);
-    const file = e.dataTransfer.files?.[0];
-    if (!file) return;
-
-    // Auto-switch mode based on dropped file type
-    if (file.type === 'application/pdf') {
-      setInputMode('pdf');
-    } else if (file.type.startsWith('video/')) {
-      setInputMode('video');
-    } else if (file.type.startsWith('audio/')) {
-      setInputMode('audio');
-    }
-
-    await handleFileDropped(file);
+    const files = Array.from(e.dataTransfer.files ?? []);
+    if (files.length > 0) await addFiles(files);
   }
 
-  // ── File upload handlers ─────────────────────────────────────────────────
+  // ── File validation & ingestion ───────────────────────────────────────────
 
-  async function handlePdfUpload(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  async function addFiles(incoming: File[]) {
+    setFileError('');
 
-    // Reset all previous PDF state before starting
-    setPdfError('');
-    setPdfPageCount(null);
-    setTranscript('');
-    setPdfFile(null);
+    const existing     = uploadedFiles;
+    const combined     = [...existing.map(u => u.file), ...incoming];
+    const uniqueFiles  = combined.filter(
+      (f, i, arr) => arr.findIndex(x => x.name === f.name && x.size === f.size) === i,
+    );
 
-    if (file.type !== 'application/pdf') { setPdfError('Only PDF files accepted.'); return; }
-    if (file.size > MAX_FILE_MB * 1024 * 1024) { setPdfError(`File too large. Max ${MAX_FILE_MB} MB.`); return; }
+    if (uniqueFiles.length > MAX_FILES) {
+      setFileError(`Maximum ${MAX_FILES} files allowed. Remove a file before adding more.`);
+      return;
+    }
 
-    setPdfFile(file);
-    setMediaStatus('uploading');
+    const totalBytes = uniqueFiles.reduce((sum, f) => sum + f.size, 0);
+    if (totalBytes > MAX_TOTAL_BYTES) {
+      setFileError(`Combined file size exceeds ${MAX_TOTAL_MB} MB. Please use smaller files.`);
+      return;
+    }
 
-    try {
-      // Read the file into an ArrayBuffer — done before any async PDF work
-      const arrayBuffer = await file.arrayBuffer();
+    // Only process newly added files (not ones already in state)
+    const newFiles = incoming.filter(
+      f => !existing.some(u => u.file.name === f.name && u.file.size === f.size),
+    );
 
-      // Dynamically import pdfjs-dist so it only runs in the browser,
-      // never during SSR where DOMMatrix / DOMRect don't exist.
-      const pdfjsLib = await import('pdfjs-dist');
-      pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+    if (newFiles.length === 0) return;
 
-      // Load the PDF document using pdfjs-dist in the browser
-      const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
-      const pdf = await loadingTask.promise;
-      const numPages = pdf.numPages;
-      setPdfPageCount(numPages);
-
-      // Extract text from every page
-      let extractedText = '';
-      for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-        const page = await pdf.getPage(pageNum);
-        const content = await page.getTextContent();
-        const pageText = content.items
-          .map((item) => ('str' in item ? item.str : ''))
-          .join(' ')
-          .replace(/\s+/g, ' ')
-          .trim();
-        extractedText += `\n\nPage ${pageNum}\n${pageText}`;
-      }
-
-      const trimmed = extractedText.trim();
-
-      if (!trimmed) {
-        // PDF opened fine but has no selectable text — likely scanned
-        setPdfError('No selectable text detected in this PDF. OCR is required to extract text from scanned documents. Please paste the text manually.');
-        setPdfFile(null);
-        setMediaStatus('error');
+    // Validate each new file's type
+    for (const f of newFiles) {
+      const allowed =
+        f.type === 'application/pdf' ||
+        ALLOWED_AUDIO_TYPES.has(f.type) ||
+        ALLOWED_VIDEO_TYPES.has(f.type);
+      if (!allowed) {
+        setFileError(`"${f.name}" is not a supported format. Accepted: PDF, MP4, MOV, WebM, MP3, WAV, FLAC.`);
         return;
       }
-
-      setTranscript(trimmed);
-      setMediaStatus('done');
-    } catch (error: unknown) {
-      console.error('PDF extraction error:', error);
-      const msg = error instanceof Error ? error.message : 'Failed to extract text from PDF.';
-      // Distinguish password-protected PDFs
-      const friendly = msg.includes('password')
-        ? 'This PDF is password-protected. Please remove the password and try again.'
-        : msg.includes('Invalid PDF')
-        ? 'This file does not appear to be a valid PDF.'
-        : msg;
-      setPdfError(friendly);
-      setPdfFile(null);
-      setMediaStatus('error');
     }
+
+    // Add all new files in 'processing' state before kicking off async work
+    const newEntries: UploadedFile[] = newFiles.map(f => ({
+      file: f, status: 'processing', error: '', extractedText: '',
+    }));
+    setUploadedFiles(prev => [...prev, ...newEntries]);
+
+    // Process each new file independently & in parallel
+    await Promise.all(newFiles.map(processFile));
   }
 
-  async function handleMediaUpload(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // Clear any previous error/result immediately, but don't touch mediaStatus
-    // yet — setting it to 'idle' here would overwrite a concurrent upload's state.
-    setMediaError('');
-    setTranscript('');
-
-    if (file.size > MAX_MEDIA_MB * 1024 * 1024) {
-      setMediaError(`File too large. Max ${MAX_MEDIA_MB} MB allowed.`);
-      return;
-    }
-
-    // Mirror the server's ALLOWED_MIME_TYPES set so the client never rejects a
-    // type the server would accept (was the primary cause of the first-attempt
-    // failure — e.g. audio/wav, audio/webm, video/webm were server-allowed but
-    // client-blocked, leading to an immediate error that looked like a server fault).
-    const allowedAudio = new Set([
-      'audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/webm',
-      'audio/ogg', 'audio/flac', 'audio/x-flac',
-    ]);
-    const allowedVideo = new Set([
-      'video/mp4', 'video/quicktime', 'video/webm',
-      'video/mpeg', 'video/x-msvideo',
-    ]);
-    const allowed = inputMode === 'audio' ? allowedAudio
-                  : new Set([...allowedAudio, ...allowedVideo]);
-
-    if (!allowed.has(file.type)) {
-      setMediaError(
-        `Unsupported file type. Accepted: ${
-          inputMode === 'audio'
-            ? 'MP3, WAV, OGG, FLAC, WebM audio'
-            : 'MP4, MOV, WebM, MP3, WAV, OGG, FLAC'
-        }`
-      );
-      return;
-    }
-
-    setMediaFile(file);
-    setMediaStatus('transcribing');
+  async function processFile(file: File) {
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      const res = await fetch('/api/transcribe', { method: 'POST', body: formData });
-      const data = await res.json() as { transcript?: string; error?: string };
-      if (!res.ok || data.error) throw new Error(data.error ?? 'Transcription failed.');
-      setTranscript(data.transcript ?? '');
-      setMediaStatus('done');
+      let text = '';
+
+      if (file.type === 'application/pdf') {
+        text = await extractPdf(file);
+      } else {
+        text = await transcribeMedia(file);
+      }
+
+      setUploadedFiles(prev =>
+        prev.map(u =>
+          u.file === file
+            ? { ...u, status: 'done', extractedText: text }
+            : u,
+        ),
+      );
     } catch (err: unknown) {
-      setMediaError(err instanceof Error ? err.message : 'Transcription failed. Try again.');
-      setMediaFile(null);
-      setMediaStatus('error');
+      const message = err instanceof Error ? err.message : 'Processing failed.';
+      setUploadedFiles(prev =>
+        prev.map(u =>
+          u.file === file
+            ? { ...u, status: 'error', error: message }
+            : u,
+        ),
+      );
     }
   }
 
-  function clearMediaFile() {
-    setMediaFile(null);
-    setPdfFile(null);
-    setPdfPageCount(null);
-    setMediaStatus('idle');
-    setMediaError('');
-    setPdfError('');
-    setTranscript('');
-    if (mediaRef.current) mediaRef.current.value = '';
-    if (fileRef.current) fileRef.current.value = '';
+  async function extractPdf(file: File): Promise<string> {
+    // Run extraction client-side using pdfjs-dist (same as before)
+    const arrayBuffer = await file.arrayBuffer();
+    const pdfjsLib    = await import('pdfjs-dist');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+
+    const pdf      = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+    let extracted  = '';
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const page    = await pdf.getPage(p);
+      const content = await page.getTextContent();
+      const pageText = content.items
+        .map((item) => ('str' in item ? item.str : ''))
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      extracted += `\n\nPage ${p}\n${pageText}`;
+    }
+
+    const trimmed = extracted.trim();
+    if (!trimmed) {
+      throw new Error(
+        'No selectable text detected in this PDF. It may be scanned — please paste the text manually.',
+      );
+    }
+    return trimmed;
   }
+
+  async function transcribeMedia(file: File): Promise<string> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res  = await fetch('/api/transcribe', { method: 'POST', body: formData });
+    const data = await res.json() as { transcript?: string; error?: string };
+    if (!res.ok || data.error) throw new Error(data.error ?? 'Transcription failed.');
+    return data.transcript ?? '';
+  }
+
+  function removeFile(index: number) {
+    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
+    setFileError('');
+  }
+
+  // Build the merged corpus from all successfully extracted files
+  function buildCorpus(): string {
+    const done = uploadedFiles.filter(u => u.status === 'done');
+    if (done.length === 0) return '';
+    if (done.length === 1) return done[0].extractedText;
+    return done
+      .map((u, i) => `=== SOURCE FILE ${i + 1}: ${u.file.name} ===\n${u.extractedText}`)
+      .join('\n\n');
+  }
+
+  // ── Quiz helpers ──────────────────────────────────────────────────────────
 
   function toggleQuestionType(qt: QuestionType) {
     setQuizConfig(c => {
@@ -325,31 +329,40 @@ export default function Generator() {
     setQuizConfig(c => ({ ...c, feedbackSettings: { ...c.feedbackSettings, ...patch } }));
   }
 
-  // ── Main generate handler ────────────────────────────────────────────────
+  // ── Main generate handler ─────────────────────────────────────────────────
 
   async function handleGenerate() {
     if (!contentType) { setError('Please select a content type first.'); return; }
-    if (!transcript.trim()) { setError('Please add your content first (paste text, upload a PDF, or upload audio/video).'); return; }
+
+    // Resolve final content — multi-file corpus OR manual text area
+    const corpus = uploadedFiles.length > 0 ? buildCorpus() : transcript.trim();
+
+    if (!corpus) {
+      setError('Please add your content first (paste text, or upload up to 3 PDF / audio / video files).');
+      return;
+    }
     if (!userId) { setError('Please sign in to generate content assets.'); return; }
     if (genUsed >= GENERATION_LIMIT_PER_3_DAYS) {
-      setError(`Limit reached (${GENERATION_LIMIT_PER_3_DAYS} per 3 days). Come back in a few days!`); return;
+      setError(`Limit reached (${GENERATION_LIMIT_PER_3_DAYS} per 3 days). Come back in a few days!`);
+      return;
     }
     if (contentType === 'quiz' && quizConfig.questionTypes.length === 0) {
       setError('Select at least one question type.'); return;
     }
     setError(''); setGenerating(true);
+
     try {
       const session = await getSessionAsync();
 
       const resolvedCount = customCount
         ? (quizConfig.customQuestionCount ?? 10)
-        : quizConfig.questionCount; // 'ai' passes through as-is
+        : quizConfig.questionCount;
 
       const finalQuizConfig: QuizConfig = { ...quizConfig, questionCount: resolvedCount };
 
       const resolvedTaskCount = customTaskCount
         ? (taskConfig.customTaskCount ?? 8)
-        : taskConfig.taskCount; // 'ai' passes through as-is
+        : taskConfig.taskCount;
 
       const finalTaskConfig: PracticeTaskConfig = { ...taskConfig, taskCount: resolvedTaskCount };
 
@@ -358,24 +371,21 @@ export default function Generator() {
         contentType,
         flashcardCount: contentType === 'review_cards' ? (fcOptions.cardCount === 'ai' ? 0 : fcOptions.cardCount) : 0,
         flashcardImages: contentType === 'review_cards' ? fcOptions.includeImages : false,
-        quizConfig: contentType === 'quiz' ? finalQuizConfig : undefined,
-        taskConfig: contentType === 'activities' ? finalTaskConfig : undefined,
+        quizConfig:  contentType === 'quiz'       ? finalQuizConfig : undefined,
+        taskConfig:  contentType === 'activities' ? finalTaskConfig : undefined,
       };
 
-      // Pre-generate slug for content types that publish with a public URL.
-      // The title isn't known yet so we pass a placeholder; the server will
-      // overwrite with the real title once the AI returns it.
       let slug: string | undefined;
       if (contentType === 'review_cards' || contentType === 'quiz') {
         slug = await dbMakeSlug(contentType === 'quiz' ? (finalQuizConfig.quizTitle || '') : '');
       }
 
       const res = await fetch('/api/generate', {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
-          input: { transcript, supplemental, options: genOptions },
+          input: { transcript: corpus, supplemental, options: genOptions },
           tierId: 'standard',
           ...(contentType === 'review_cards' ? { flashcardOptions: fcOptions, slug, creatorUsername: session?.username ?? '' } : {}),
           ...(contentType === 'quiz'         ? { quizConfig: finalQuizConfig, slug, creatorUsername: session?.username ?? '' } : {}),
@@ -388,17 +398,15 @@ export default function Generator() {
       if (!res.ok || data.error) throw new Error(data.error ?? 'Generation failed.');
       if (!data.course) throw new Error('No result returned.');
 
-      // Await so the counter updates before navigation (handles the case where
-      // the user immediately presses Back and returns to this page).
       await dbGetGenUsed3Days().then(setGenUsed);
 
       router.push(
-        contentType === 'resource_page'  ? `/visual-guide/${data.course.id}` :
-        contentType === 'branded_guide'  ? `/pdf-pack/${data.course.id}` :
-        contentType === 'quiz'           ? `/quiz/${data.course.id}/edit` :
-        contentType === 'activities'     ? `/tasks/${data.course.id}/edit` :
-        contentType === 'review_cards'   ? `/editor/${data.course.id}/flashcards` :
-                                           `/editor/${data.course.id}`
+        contentType === 'resource_page' ? `/visual-guide/${data.course.id}` :
+        contentType === 'branded_guide' ? `/pdf-pack/${data.course.id}` :
+        contentType === 'quiz'          ? `/quiz/${data.course.id}/edit` :
+        contentType === 'activities'    ? `/tasks/${data.course.id}/edit` :
+        contentType === 'review_cards'  ? `/editor/${data.course.id}/flashcards` :
+                                          `/editor/${data.course.id}`
       );
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Generation failed. Try again.');
@@ -407,12 +415,18 @@ export default function Generator() {
     }
   }
 
-  const sel      = contentType ? CONTENT_TYPES.find(t => t.id === contentType) : null;
-  const genRemain = Math.max(0, GENERATION_LIMIT_PER_3_DAYS - genUsed);
+  // ── Computed ──────────────────────────────────────────────────────────────
+
+  const sel        = contentType ? CONTENT_TYPES.find(t => t.id === contentType) : null;
+  const genRemain  = Math.max(0, GENERATION_LIMIT_PER_3_DAYS - genUsed);
+  const totalBytes = uploadedFiles.reduce((s, u) => s + u.file.size, 0);
+  const canAddMore = uploadedFiles.length < MAX_FILES && totalBytes < MAX_TOTAL_BYTES;
 
   const inp = 'w-full px-3 py-2 text-sm border border-gray-200 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 text-gray-900 dark:text-white';
 
   if (!ready) return null;
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <Layout>
@@ -421,8 +435,10 @@ export default function Generator() {
         {/* ── Header ──────────────────────────────────────────────────────── */}
         <div className="mb-4 flex items-start justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Create learning assets</h1>
-            <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">Paste a transcript, upload a video, or drop a PDF — get flashcard decks, quizzes, practice tasks, content guides, and visual explainers in seconds.</p>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Create content assets</h1>
+            <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">
+              Paste a transcript, or upload up to 3 files (PDFs, audio, or video) — get flashcard decks, quizzes, interactive challenges, content guides, and illustrated explainers in seconds.
+            </p>
           </div>
           <span className={`flex-shrink-0 text-xs font-medium px-2.5 py-1 rounded-full border ${
             genRemain === 0
@@ -457,175 +473,135 @@ export default function Generator() {
           </div>
         </div>
 
-        {/* ── Step 2: Upload / Paste Content ────────────────────────────── */}
+        {/* ── Step 2: Add Content ─────────────────────────────────────────── */}
         <div className="mb-6">
-          <h2 className="text-sm font-semibold text-gray-800 dark:text-slate-200 mb-3">2. Add your content</h2>
+          <h2 className="text-sm font-semibold text-gray-800 dark:text-slate-200 mb-1">2. Add your content</h2>
+          <p className="text-xs text-gray-400 dark:text-slate-500 mb-3">
+            Upload up to {MAX_FILES} files (PDFs, audio, or video) — or paste text directly. Combined file limit: {MAX_TOTAL_MB} MB.
+          </p>
 
-          {/* Input mode selector */}
-          <div className="flex gap-2 mb-4 flex-wrap">
-            {([
-              { id: 'text',  icon: FileText, label: 'Paste Text' },
-              { id: 'pdf',   icon: FileText, label: 'PDF' },
-              { id: 'audio', icon: Mic,      label: 'Audio' },
-              { id: 'video', icon: Video,    label: 'Video' },
-            ] as const).map(({ id, icon: Icon, label }) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => { setInputMode(id); clearMediaFile(); }}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                  inputMode === id
-                    ? 'bg-blue-600 text-white border-blue-600'
-                    : 'border-gray-200 dark:border-slate-600 text-gray-600 dark:text-slate-400 hover:bg-gray-50 dark:hover:bg-slate-800'
-                }`}
-              >
-                <Icon size={12} /> {label}
-              </button>
-            ))}
-          </div>
+          {/* ── File upload zone ─────────────────────────────────────────── */}
+          <div className="space-y-3">
 
-          {/* Text input */}
-          {inputMode === 'text' && (
-            <textarea
-              className={`${inp} resize-none`}
-              rows={10}
-              value={transcript}
-              onChange={e => setTranscript(e.target.value)}
-              placeholder="Paste your content here — article, newsletter, blog post, transcript, script, notes, etc."
-            />
-          )}
+            {/* Uploaded file list */}
+            {uploadedFiles.length > 0 && (
+              <div className="space-y-2">
+                {uploadedFiles.map((u, idx) => (
+                  <div
+                    key={`${u.file.name}-${u.file.size}`}
+                    className="flex items-center gap-3 px-4 py-3 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl"
+                  >
+                    <FileTypeIcon mime={u.file.type} size={17} />
 
-          {/* PDF upload */}
-          {inputMode === 'pdf' && (
-            <div className="space-y-3">
-              {!pdfFile ? (
-                <label
-                  className={`flex flex-col items-center justify-center gap-3 border-2 border-dashed rounded-xl p-8 cursor-pointer transition-colors ${
-                    dragOver
-                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 scale-[1.01]'
-                      : 'border-gray-200 dark:border-slate-600 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50/50 dark:hover:bg-blue-900/10'
-                  }`}
-                  onDragOver={onDragOver}
-                  onDragLeave={onDragLeave}
-                  onDragEnd={onDragEnd}
-                  onDrop={onDrop}
-                >
-                  <Upload size={24} className={dragOver ? 'text-blue-500' : 'text-gray-400 dark:text-slate-500'} />
-                  <div className="text-center">
-                    <p className="text-sm font-medium text-gray-700 dark:text-slate-300">
-                      {dragOver ? 'Drop to upload' : 'Drag & drop or click to upload PDF'}
-                    </p>
-                    <p className="text-xs text-gray-400 dark:text-slate-500 mt-0.5">Max {MAX_FILE_MB} MB</p>
-                  </div>
-                  <input ref={fileRef} type="file" accept=".pdf,application/pdf" className="hidden" onChange={handlePdfUpload} />
-                </label>
-              ) : (
-                <div className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl">
-                  <FileText size={18} className="text-blue-600 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{pdfFile.name}</p>
-                    {mediaStatus === 'uploading' && (
-                      <p className="text-xs text-gray-500 dark:text-slate-400">Extracting text…</p>
-                    )}
-                    {mediaStatus === 'done' && pdfPageCount !== null && (
-                      <p className="text-xs text-green-600 dark:text-green-400">
-                        {pdfPageCount} page{pdfPageCount !== 1 ? 's' : ''} · {transcript.trim().split(/\s+/).filter(Boolean).length.toLocaleString()} words extracted ✓
-                      </p>
-                    )}
-                  </div>
-                  <button type="button" onClick={clearMediaFile} className="text-gray-400 hover:text-red-500 transition-colors flex-shrink-0">
-                    <X size={14} />
-                  </button>
-                </div>
-              )}
-
-              {/* Extracted text preview — editable so user can trim/correct before generation */}
-              {mediaStatus === 'done' && transcript && (
-                <div className="bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl p-3">
-                  <p className="text-xs font-medium text-gray-600 dark:text-slate-400 mb-2">Extracted text preview (editable):</p>
-                  <textarea
-                    className={`${inp} resize-none text-xs`}
-                    rows={6}
-                    value={transcript}
-                    onChange={e => setTranscript(e.target.value)}
-                  />
-                </div>
-              )}
-
-              {pdfError && <p className="text-xs text-red-600 dark:text-red-400">{pdfError}</p>}
-            </div>
-          )}
-
-          {/* Audio/Video upload */}
-          {(inputMode === 'audio' || inputMode === 'video') && (
-            <div>
-              {!mediaFile ? (
-                <label
-                  className={`flex flex-col items-center justify-center gap-3 border-2 border-dashed rounded-xl p-8 cursor-pointer transition-colors ${
-                    dragOver
-                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 scale-[1.01]'
-                      : 'border-gray-200 dark:border-slate-600 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50/50 dark:hover:bg-blue-900/10'
-                  }`}
-                  onDragOver={onDragOver}
-                  onDragLeave={onDragLeave}
-                  onDragEnd={onDragEnd}
-                  onDrop={onDrop}
-                >
-                  {inputMode === 'audio'
-                    ? <Mic size={24} className={dragOver ? 'text-blue-500' : 'text-gray-400 dark:text-slate-500'} />
-                    : <Video size={24} className={dragOver ? 'text-blue-500' : 'text-gray-400 dark:text-slate-500'} />}
-                  <div className="text-center">
-                    <p className="text-sm font-medium text-gray-700 dark:text-slate-300">
-                      {dragOver ? 'Drop to upload' : `Drag & drop or click to upload ${inputMode === 'audio' ? 'Audio' : 'Video'}`}
-                    </p>
-                    <p className="text-xs text-gray-400 dark:text-slate-500 mt-0.5">
-                      {inputMode === 'audio' ? 'MP3' : 'MP4, MOV'} · Max {MAX_MEDIA_MB} MB
-                    </p>
-                    <p className="text-xs text-gray-400 dark:text-slate-500 mt-0.5">Auto-transcribed using AI before generation</p>
-                  </div>
-                  <input
-                    ref={mediaRef}
-                    type="file"
-                    accept={inputMode === 'audio'
-                      ? 'audio/mpeg,.mp3'
-                      : 'video/mp4,video/quicktime,video/mpeg,audio/mpeg,.mp3'
-                    }
-                    className="hidden"
-                    onChange={handleMediaUpload}
-                  />
-                </label>
-              ) : (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl">
-                    {inputMode === 'audio' ? <Mic size={18} className="text-blue-600 flex-shrink-0" /> : <Video size={18} className="text-blue-600 flex-shrink-0" />}
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{mediaFile.name}</p>
-                      {mediaStatus === 'transcribing' && <p className="text-xs text-blue-600 dark:text-blue-400">Transcribing with AI… this may take a moment</p>}
-                      {mediaStatus === 'done' && <p className="text-xs text-green-600 dark:text-green-400">Transcription complete ✓</p>}
-                      {mediaStatus === 'error' && <p className="text-xs text-red-600 dark:text-red-400">{mediaError}</p>}
+                      <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{u.file.name}</p>
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                        <span className="text-xs text-gray-400 dark:text-slate-500">
+                          {fileTypeLabel(u.file.type)} · {formatBytes(u.file.size)}
+                        </span>
+                        {u.status === 'processing' && (
+                          <span className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400">
+                            <span className="inline-block w-3 h-3 border border-blue-400 border-t-transparent rounded-full animate-spin" />
+                            {u.file.type === 'application/pdf' ? 'Extracting text…' : 'Transcribing…'}
+                          </span>
+                        )}
+                        {u.status === 'done' && (
+                          <span className="text-xs text-green-600 dark:text-green-400 font-medium">
+                            ✓ {u.extractedText.trim().split(/\s+/).filter(Boolean).length.toLocaleString()} words
+                          </span>
+                        )}
+                        {u.status === 'error' && (
+                          <span className="text-xs text-red-500 dark:text-red-400">{u.error}</span>
+                        )}
+                      </div>
                     </div>
-                    <button type="button" onClick={clearMediaFile} className="text-gray-400 hover:text-red-500 transition-colors">
+
+                    <button
+                      type="button"
+                      onClick={() => removeFile(idx)}
+                      className="text-gray-400 hover:text-red-500 transition-colors flex-shrink-0 p-1"
+                      title="Remove file"
+                    >
                       <X size={14} />
                     </button>
                   </div>
-                  {mediaStatus === 'done' && transcript && (
-                    <div className="bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl p-3">
-                      <p className="text-xs font-medium text-gray-600 dark:text-slate-400 mb-2">Transcript preview:</p>
-                      <p className="text-xs text-gray-500 dark:text-slate-500 leading-relaxed line-clamp-4">{transcript}</p>
-                      <button
-                        type="button"
-                        onClick={() => setInputMode('text')}
-                        className="mt-2 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 font-medium"
-                      >
-                        Edit transcript
-                      </button>
-                    </div>
-                  )}
+                ))}
+
+                {/* Combined word count badge */}
+                {uploadedFiles.filter(u => u.status === 'done').length > 1 && (
+                  <div className="flex items-center gap-1.5 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                    <Layers size={13} className="text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                    <p className="text-xs text-blue-700 dark:text-blue-300 font-medium">
+                      {uploadedFiles.filter(u => u.status === 'done').length} sources merged ·{' '}
+                      {buildCorpus().trim().split(/\s+/).filter(Boolean).length.toLocaleString()} total words — IBM Granite will synthesize across all files
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Drop zone / add-more button */}
+            {canAddMore && (
+              <label
+                className={`flex flex-col items-center justify-center gap-3 border-2 border-dashed rounded-xl p-6 cursor-pointer transition-colors ${
+                  dragOver
+                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                    : uploadedFiles.length === 0
+                    ? 'border-gray-200 dark:border-slate-600 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50/50 dark:hover:bg-blue-900/10'
+                    : 'border-gray-200 dark:border-slate-600 hover:border-blue-400 dark:hover:border-blue-500 bg-gray-50/50 dark:bg-slate-800/50'
+                }`}
+                onDragOver={onDragOver}
+                onDragLeave={onDragLeave}
+                onDragEnd={onDragEnd}
+                onDrop={onDrop}
+              >
+                <Upload size={22} className={dragOver ? 'text-blue-500' : 'text-gray-400 dark:text-slate-500'} />
+                <div className="text-center">
+                  <p className="text-sm font-medium text-gray-700 dark:text-slate-300">
+                    {dragOver
+                      ? 'Drop to add file'
+                      : uploadedFiles.length === 0
+                      ? 'Drag & drop or click to upload files'
+                      : `Add another file (${uploadedFiles.length}/${MAX_FILES})`}
+                  </p>
+                  <p className="text-xs text-gray-400 dark:text-slate-500 mt-0.5">
+                    PDF, MP4, MOV, WebM, MP3, WAV, FLAC · Up to {MAX_FILES} files · {MAX_TOTAL_MB} MB combined
+                  </p>
                 </div>
-              )}
-              {mediaError && !mediaFile && <p className="text-xs text-red-600 dark:text-red-400 mt-2">{mediaError}</p>}
-            </div>
-          )}
+                <input
+                  ref={dropRef}
+                  type="file"
+                  multiple
+                  accept=".pdf,application/pdf,video/mp4,video/quicktime,video/webm,video/mpeg,audio/mpeg,.mp3,audio/wav,.wav,audio/flac,.flac,audio/webm,audio/ogg"
+                  className="hidden"
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                    const files = Array.from(e.target.files ?? []);
+                    if (files.length > 0) addFiles(files);
+                    // Reset so the same file can be re-added after removal
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+            )}
+
+            {/* Manual text area — shown when no files are uploaded */}
+            {uploadedFiles.length === 0 && (
+              <div>
+                <p className="text-xs text-gray-400 dark:text-slate-500 mb-1.5">— or paste text directly —</p>
+                <textarea
+                  className={`${inp} resize-none`}
+                  rows={10}
+                  value={transcript}
+                  onChange={e => setTranscript(e.target.value)}
+                  placeholder="Paste your content here — article, newsletter, blog post, transcript, script, notes, etc."
+                />
+              </div>
+            )}
+
+            {fileError && (
+              <p className="text-xs text-red-600 dark:text-red-400">{fileError}</p>
+            )}
+          </div>
 
           {/* Supplemental context */}
           <div className="mt-3">
@@ -654,7 +630,7 @@ export default function Generator() {
           <div className="mb-6">
             <h2 className="text-sm font-semibold text-gray-800 dark:text-slate-200 mb-3">3. Configure your asset</h2>
 
-            {/* Flashcard Deck options */}
+            {/* Flashcard Decks options */}
             {contentType === 'review_cards' && (
               <div className="bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 p-4 space-y-4">
                 <div>
@@ -664,7 +640,7 @@ export default function Generator() {
                       onClick={() => setFcOptions(o => ({ ...o, cardCount: 'ai' }))}
                       className={`px-3 py-1.5 text-xs rounded-lg border font-medium transition-all ${fcOptions.cardCount === 'ai' ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-200 dark:border-slate-600 text-gray-600 dark:text-slate-400 hover:border-gray-300'}`}
                     >✦ AI decides</button>
-                    {[5, 10, 15, 20].map(n => (
+                    {[5, 10, 15, 20, 25].map(n => (
                       <button key={n} type="button"
                         onClick={() => setFcOptions(o => ({ ...o, cardCount: n }))}
                         className={`px-3 py-1.5 text-xs rounded-lg border font-medium transition-all ${fcOptions.cardCount === n ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-200 dark:border-slate-600 text-gray-600 dark:text-slate-400 hover:border-gray-300'}`}
@@ -672,7 +648,7 @@ export default function Generator() {
                     ))}
                   </div>
                   {fcOptions.cardCount === 'ai' && (
-                    <p className="mt-2 text-xs text-blue-600 dark:text-blue-400">AI will analyse the key topics and generate the right number of cards to cover them — no more, no less.</p>
+                    <p className="mt-2 text-xs text-blue-600 dark:text-blue-400">AI will analyse all topics and select the most important ones — up to 25 cards max.</p>
                   )}
                 </div>
                 <div className="flex items-center justify-between">
@@ -692,7 +668,7 @@ export default function Generator() {
               </div>
             )}
 
-            {/* Interactive Quizzes options */}
+            {/* Audience Quizzes options */}
             {contentType === 'quiz' && (
               <div className="bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 p-4 space-y-4">
                 <div>
@@ -761,7 +737,7 @@ export default function Generator() {
                     <input type="number" min={1} max={50} className={`${inp} mt-2 max-w-[120px]`}
                       value={quizConfig.customQuestionCount ?? ''}
                       onChange={e => setQuizConfig(c => ({ ...c, customQuestionCount: Math.min(50, Math.max(1, parseInt(e.target.value) || 1)) }))}
-                      placeholder="Count" />
+                      placeholder="1–50" />
                   )}
                 </div>
                 <div>
@@ -805,7 +781,7 @@ export default function Generator() {
               </div>
             )}
 
-            {/* Practice Tasks options */}
+            {/* Interactive Challenges options */}
             {contentType === 'activities' && (
               <div className="bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 p-4 space-y-4">
                 <div>
@@ -848,10 +824,10 @@ export default function Generator() {
                     <p className="mt-2 text-xs text-blue-600 dark:text-blue-400">AI will analyse the key topics and create one task per concept — covering everything without unnecessary padding.</p>
                   )}
                   {customTaskCount && (
-                    <input type="number" min={1} max={30} className={`${inp} mt-2 max-w-[120px]`}
+                    <input type="number" min={1} max={15} className={`${inp} mt-2 max-w-[120px]`}
                       value={taskConfig.customTaskCount ?? ''}
-                      onChange={e => setTaskConfig(c => ({ ...c, customTaskCount: Math.min(30, Math.max(1, parseInt(e.target.value) || 1)) }))}
-                      placeholder="Count" />
+                      onChange={e => setTaskConfig(c => ({ ...c, customTaskCount: Math.min(15, Math.max(1, parseInt(e.target.value) || 1)) }))}
+                      placeholder="1–15" />
                   )}
                 </div>
                 <div className="flex items-center justify-between">
@@ -864,7 +840,7 @@ export default function Generator() {
               </div>
             )}
 
-            {/* Downloadable Content Guide / Visual Explainer image option */}
+            {/* Content Guide / Illustrated Explainer image option */}
             {(contentType === 'branded_guide' || contentType === 'resource_page') && (
               <div className="bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 p-4">
                 <div className="flex items-center justify-between">
@@ -910,7 +886,7 @@ export default function Generator() {
         {/* ── Generate button ───────────────────────────────────────────────── */}
         <button
           onClick={handleGenerate}
-          disabled={generating || mediaStatus === 'transcribing'}
+          disabled={generating || isProcessing}
           className="w-full flex items-center justify-center gap-2 py-3.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition-colors text-sm"
         >
           {generating ? (
@@ -918,16 +894,15 @@ export default function Generator() {
               <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
               Generating your {sel?.label ?? 'asset'}…
             </>
-          ) : mediaStatus === 'transcribing' ? (
+          ) : isProcessing ? (
             <>
               <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              Transcribing…
+              Processing files…
             </>
           ) : (
             <><Zap size={15} /> Generate {sel?.label ?? 'Content Asset'}</>
           )}
         </button>
-
 
       </div>
     </Layout>

@@ -5,11 +5,11 @@ import EduTubersLogo, { EduTubersWordmark } from '@/components/EduTubersLogo';
 
 const features = [
   { icon: Video,    text: 'Upload video, PDF, or paste a transcript' },
-  { icon: Zap,      text: 'AI generates flashcard decks, quizzes, practice tasks, content guides & visual explainers' },
+  { icon: Zap,      text: 'AI generates flashcard decks, quizzes, interactive challenges, content guides & illustrated explainers' },
   { icon: Download, text: 'Publish with a shareable link' },
 ];
 
-const pills = ['Flashcard Decks', 'Interactive Quizzes', 'Practice Tasks', 'Downloadable Content Guide', 'Visual Explainer'];
+const pills = ['Flashcard Decks', 'Audience Quizzes', 'Interactive Challenges', 'Content Guide', 'Illustrated Explainer'];
 
 export default function AuthPage() {
   return (
@@ -28,16 +28,16 @@ export default function AuthPage() {
 
         <div className="relative z-10 flex-1 flex flex-col justify-center py-12">
           <div className="inline-flex items-center gap-2 bg-white/15 text-white/90 text-xs font-semibold px-3 py-1.5 rounded-full mb-6 w-fit">
-            <Zap size={11} /> Turn educational content into active learning
+            <Zap size={11} /> Turn your content into interactive audience experiences
           </div>
           <h1 className="text-4xl xl:text-5xl font-bold text-white leading-tight mb-4">
             Your content.<br />
             <span className="text-blue-200">Instantly</span><br />
-            made learnable.
+            made interactive.
           </h1>
           <p className="text-blue-100 text-sm leading-relaxed mb-8 max-w-sm">
             Paste a transcript, upload a video, or drop a PDF — EduTubers builds
-            flashcard decks, quizzes, practice tasks, content guides, and visual explainers in seconds.
+            flashcard decks, quizzes, interactive challenges, content guides, and illustrated explainers in seconds.
           </p>
           <div className="space-y-3 mb-8">
             {features.map(({ icon: Icon, text }) => (
@@ -72,7 +72,7 @@ export default function AuthPage() {
           <div className="mb-8 text-center">
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Get started</h2>
             <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">
-              Sign in to create and save your study materials.
+              Sign in to create and publish your content assets.
             </p>
           </div>
 

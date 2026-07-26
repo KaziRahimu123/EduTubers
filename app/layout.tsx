@@ -5,8 +5,8 @@ import { ThemeProvider } from '@/components/ThemeProvider';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'EduTubers — Turn your content into interactive learning assets',
-  description: 'Transform your videos, podcasts, articles, and newsletters into interactive learning assets — flashcard decks, quizzes, practice tasks, downloadable content guides, and visual explainers.',
+  title: 'EduTubers — Turn your content into interactive audience experiences',
+  description: 'Transform your videos, podcasts, articles, and newsletters into interactive content assets — flashcard decks, quizzes, interactive challenges, content guides, and illustrated explainers.',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

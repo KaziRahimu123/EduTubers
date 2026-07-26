@@ -3,11 +3,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Printer, ImageOff, Pencil, RefreshCw, Upload, StopCircle } from 'lucide-react';
+import { ArrowLeft, Printer, ImageOff, Pencil, RefreshCw, Upload, StopCircle, Lock, Globe, CheckCircle } from 'lucide-react';
 import RichNotesEditor, { mdToHtml, htmlToMd } from '@/components/RichNotesEditor';
-import { dbGetCourse, dbSaveCourse, dbUploadImage } from '@/lib/db';
-import { useAuthGuard } from '@/lib/useAuthGuard';
+import { dbGetCourse, dbSaveCourse, dbUploadImage, dbIncrementViews, dbProxy } from '@/lib/db';
+import { useIsCreator } from '@/lib/useIsCreator';
 import type { Course, Module } from '@/lib/types';
+import { cleanTitle } from '@/lib/cleanTitle';
 import FeedbackForm from '@/components/FeedbackForm';
 
 // ── Image generation helper ───────────────────────────────────────────────────
@@ -201,12 +202,13 @@ function CaptionField({ value, onChange, accentColor }: { value: string; onChang
 }
 
 export default function VisualGuidePage() {
-  const ready = useAuthGuard();
+  const isCreator = useIsCreator();
   const params = useParams();
   const id = params.id as string;
 
   const [course, setCourse] = useState<Course | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [saved, setSaved] = useState(false);
   // imageUrls[i]: undefined=not started/no images, null=loading, ''=failed, string=url
   const [imageUrls, setImageUrls] = useState<Record<number, string | null | undefined>>({});
   const imageUrlsRef = useRef<Record<number, string | null | undefined>>({});
@@ -216,7 +218,6 @@ export default function VisualGuidePage() {
   const cancelledRef = useRef(false);
 
   useEffect(() => {
-    if (!ready) return;
     imageUrlsRef.current = {};
     cancelledRef.current = false;
 
@@ -234,7 +235,8 @@ export default function VisualGuidePage() {
       if (cancelledRef.current) return;
       if (!c) { setNotFound(true); return; }
       setCourse(c);
-      document.title = c.title.replace(/^visual explainer:\s*/i, '');
+      document.title = c.title.replace(/^illustrated explainer:\s*/i, '').replace(/^visual story:\s*/i, '').replace(/^visual explainer:\s*/i, '');
+      if (c.status === 'published') dbIncrementViews(c.id);
 
       // Load already-saved images; validate each URL with a HEAD request so
       // broken/deleted storage objects don't stay stuck as "loaded" — they get
@@ -313,9 +315,9 @@ export default function VisualGuidePage() {
     return () => {
       cancelledRef.current = true;
       setGenerating(false);
-      document.title = 'Visual Explainer';
+      document.title = 'Illustrated Explainer';
     };
-  }, [ready, id]);
+  }, [id]);
 
   function regenerate(i: number) {
     if (!course) return;
@@ -368,7 +370,7 @@ export default function VisualGuidePage() {
       );
       const updated = { ...course, modules };
       setCourse(updated);
-      dbSaveCourse(updated);
+      await dbSaveCourse(updated);
     };
     reader.readAsDataURL(file);
   }
@@ -410,13 +412,30 @@ export default function VisualGuidePage() {
     patchCourse({ modules });
   }
 
-  if (!ready) return null;
+  async function togglePublish() {
+    if (!course) return;
+    const isPublishing = course.status !== 'published';
+    let slug = course.slug;
+    if (isPublishing && (!slug || slug.trim() === '')) {
+      const res = await dbProxy<{ slug: string }>('make_slug', { title: course.title, existingCourseId: course.id });
+      slug = res?.slug ?? course.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 60);
+    }
+    const updated: Course = {
+      ...course,
+      status: isPublishing ? 'published' : 'draft',
+      slug,
+    };
+    setCourse(updated);
+    await dbSaveCourse(updated);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
+  }
 
   if (!course) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         {notFound ? (
-          <p className="text-gray-500">Not found. <Link href="/dashboard" className="text-blue-600 underline">Dashboard</Link></p>
+          <p className="text-gray-500">Content not found.</p>
         ) : (
           <div className="flex flex-col items-center gap-3">
             <div className="w-8 h-8 border-4 border-indigo-400 border-t-transparent rounded-full animate-spin" />
@@ -427,19 +446,42 @@ export default function VisualGuidePage() {
     );
   }
 
+  if (!isCreator && course.status !== 'published') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-slate-900 p-4 text-center">
+        <div className="max-w-md bg-white dark:bg-slate-800 rounded-2xl border border-gray-200 dark:border-slate-700 p-8 shadow-sm">
+          <div className="w-12 h-12 rounded-full bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto mb-4">
+            <Lock size={24} />
+          </div>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Content Unavailable</h2>
+          <p className="text-sm text-gray-500 dark:text-slate-400 mb-6">
+            This content is currently unpublished or set to draft mode by the creator.
+          </p>
+          <a href="/" className="inline-flex items-center justify-center px-4 py-2 bg-blue-600 text-white font-medium text-sm rounded-lg hover:bg-blue-700 transition-colors">
+            Return Home
+          </a>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       {/* ── Toolbar — screen only ─────────────────────────────────────────── */}
       <div className="print:hidden sticky top-0 z-40 bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <Link href="/dashboard" className="inline-flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900">
-            <ArrowLeft size={15} /> Back
-          </Link>
-          <span className="text-gray-300">|</span>
-          <span className="text-sm font-medium text-gray-700 truncate max-w-xs">{course.title}</span>
+          {isCreator && (
+            <>
+              <Link href="/dashboard" className="inline-flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900">
+                <ArrowLeft size={15} /> Back
+              </Link>
+              <span className="text-gray-300">|</span>
+            </>
+          )}
+          <span className="text-sm font-medium text-gray-700 truncate max-w-xs">{cleanTitle(course.title)}</span>
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-gray-400">Click any text to edit</span>
+          {isCreator && <span className="text-xs text-gray-400">Click any text to edit</span>}
           <button
             onClick={() => window.print()}
             className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 hover:bg-gray-700 text-white text-sm font-semibold rounded-lg transition-colors"
@@ -467,15 +509,12 @@ export default function VisualGuidePage() {
                   className="px-8 pt-10 pb-8"
                   style={{ backgroundColor: coverAccent.pageBg }}
                 >
-                  <div className="mb-2">
-                    <span className="text-xs font-bold uppercase tracking-widest" style={{ color: coverAccent.label }}>Visual Explainer</span>
-                  </div>
                   <h1 className="text-4xl font-bold leading-tight mb-3 print:text-3xl" style={{ color: coverAccent.text }}>
                     <EditableText
-                      value={course.title.replace(/^visual explainer:\s*/i, '')}
+                      value={cleanTitle(course.title)}
                       onChange={v => patchCourse({ title: v })}
                       className="text-4xl font-bold leading-tight print:text-3xl"
-                      placeholder="Study guide title…"
+                      placeholder="Explainer title…"
                     />
                   </h1>
                   <div className="text-base leading-relaxed" style={{ color: coverAccent.text, opacity: 0.8 }}>

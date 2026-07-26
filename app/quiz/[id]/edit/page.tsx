@@ -4,12 +4,12 @@ import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
-  ArrowLeft, Save, Trash2, Plus, Globe, Lock, Download,
+  ArrowLeft, Save, Trash2, Plus, Globe, Lock,
   Settings2, MessageSquare, ChevronDown, ChevronUp, CheckCircle,
   Eye, RotateCcw,
 } from 'lucide-react';
 import Layout from '@/components/Layout';
-import { dbGetCourse, dbSaveCourse, dbDeleteCourse, dbGetQuizAttempts, dbDeleteQuizAttempts, uid } from '@/lib/db';
+import { dbGetCourse, dbSaveCourse, dbDeleteCourse, dbGetQuizAttempts, dbDeleteQuizAttempts, dbProxy, uid } from '@/lib/db';
 import { RichField } from '@/components/RichNotesEditor';
 import ProgressBar from '@/components/ProgressBar';
 import type {
@@ -246,8 +246,23 @@ export default function QuizEditorPage() {
     update({ modules });
   }
 
-  function togglePublish() {
-    update({ status: course!.status === 'published' ? 'draft' : 'published' });
+  async function togglePublish() {
+    if (!course) return;
+    const isPublishing = course.status !== 'published';
+    let slug = course.slug;
+    if (isPublishing && (!slug || slug.trim() === '')) {
+      const res = await dbProxy<{ slug: string }>('make_slug', { title: course.title, existingCourseId: course.id });
+      slug = res?.slug ?? course.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 60);
+    }
+    const updated: Course = {
+      ...course,
+      status: isPublishing ? 'published' : 'draft',
+      slug,
+    };
+    setCourse(updated);
+    await dbSaveCourse(updated);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
   }
 
   const passingScore = cfg.passingScore ?? 70;
@@ -285,10 +300,6 @@ export default function QuizEditorPage() {
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
-          <a href={`/api/quiz-pdf/${id}`} target="_blank" rel="noopener"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">
-            <Download size={13} /> PDF
-          </a>
           <Link href={`/quiz/${id}`} target="_blank"
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">
             <Eye size={13} /> Preview

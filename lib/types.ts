@@ -29,39 +29,39 @@ export const CONTENT_TYPES = [
     id: 'review_cards' as ContentType,
     emoji: '📚',
     label: 'Flashcard Decks',
-    desc: 'Auto-generated front/back flashcards from your video or transcript — ready for your audience to study and retain key concepts.',
+    desc: 'Auto-generated flashcard decks from your video or transcript — ready for your audience to explore and engage with key ideas.',
     color: 'border-rose-500 bg-rose-50 text-rose-800',
     badge: 'bg-rose-100 text-rose-700',
   },
   {
     id: 'quiz' as ContentType,
     emoji: '✅',
-    label: 'Interactive Quizzes',
-    desc: 'Multiple-choice, true/false, and short-answer quizzes with scoring, explanations, and instant feedback tied to your content.',
+    label: 'Audience Quizzes',
+    desc: 'Multiple-choice, true/false, and multiple-select quizzes with scoring, explanations, and instant feedback tied to your content.',
     color: 'border-orange-500 bg-orange-50 text-orange-800',
     badge: 'bg-orange-100 text-orange-700',
   },
   {
     id: 'activities' as ContentType,
     emoji: '🧩',
-    label: 'Practice Tasks',
-    desc: 'Applied exercises tailored to your content domain — coding challenges, science scenarios, finance decisions, reflection prompts.',
+    label: 'Interactive Challenges',
+    desc: 'Applied challenges tailored to your content — coding exercises, scenario walkthroughs, decision tasks, and reflection prompts.',
     color: 'border-purple-500 bg-purple-50 text-purple-800',
     badge: 'bg-purple-100 text-purple-700',
   },
   {
     id: 'branded_guide' as ContentType,
     emoji: '📄',
-    label: 'Downloadable Content Guide',
-    desc: 'A printable, exportable PDF study guide combining notes, key takeaways, definitions, and review questions from your content.',
+    label: 'Content Guide',
+    desc: 'A printable, exportable content guide combining notes, key takeaways, definitions, and discussion prompts from your content.',
     color: 'border-green-500 bg-green-50 text-green-800',
     badge: 'bg-green-100 text-green-700',
   },
   {
     id: 'resource_page' as ContentType,
     emoji: '🖼️',
-    label: 'Visual Explainer',
-    desc: 'AI-generated illustrated visual explainer — visual summaries that make your content easier to understand and remember.',
+    label: 'Illustrated Explainer',
+    desc: 'AI-illustrated explainer — section-by-section visual summaries that bring your content to life for your audience.',
     color: 'border-indigo-500 bg-indigo-50 text-indigo-800',
     badge: 'bg-indigo-100 text-indigo-700',
   },
@@ -89,56 +89,6 @@ export const THEME_STYLES: { id: ThemeStyle; label: string }[] = [
   { id: 'visual-heavy',  label: 'Visual-heavy' },
   { id: 'energetic',     label: 'Energetic' },
 ];
-
-// ── Creator Brand Kit ─────────────────────────────────────────────────────────
-
-export interface CreatorBrandKit {
-  creatorName: string;
-  brandName: string;
-  platformName: string;
-  websiteName: string;
-  communityName: string;
-  /** Base64 data URL or remote URL */
-  logoUrl?: string;
-  /** Base64 data URL or text watermark string */
-  watermark?: string;
-  watermarkType: 'image' | 'text';
-  primaryColor: string;
-  secondaryColor: string;
-  accentColor: string;
-  fontStyle: string;
-  themeStyle: ThemeStyle;
-  websiteUrl: string;
-  socialLinks: string[];
-  ctaText: string;
-  ctaLink: string;
-  enableQrCode: boolean;
-  footerText: string;
-  tone: Tone;
-}
-
-export const DEFAULT_BRAND_KIT: CreatorBrandKit = {
-  creatorName: '',
-  brandName: '',
-  platformName: '',
-  websiteName: '',
-  communityName: '',
-  logoUrl: undefined,
-  watermark: undefined,
-  watermarkType: 'text',
-  primaryColor: '#3b82f6',
-  secondaryColor: '#6366f1',
-  accentColor: '#f59e0b',
-  fontStyle: 'sans-serif',
-  themeStyle: 'modern',
-  websiteUrl: '',
-  socialLinks: [''],
-  ctaText: 'Visit my platform',
-  ctaLink: '',
-  enableQrCode: false,
-  footerText: '',
-  tone: 'friendly',
-};
 
 // ── Review Cards (formerly Flashcards) ────────────────────────────────────────
 
@@ -226,6 +176,25 @@ export interface QuizAttemptResult {
   passed: boolean;
   completedAt: string;
   attemptNumber: number;
+}
+
+// ── Interactive Challenge Attempts ────────────────────────────────────────────
+
+export interface TaskAttemptTaskResult {
+  taskId: string;
+  correct: boolean;
+}
+
+export interface TaskAttemptResult {
+  id: string;
+  courseId: string;
+  /** Display name of the person who took the challenge — null means anonymous */
+  takerName: string | null;
+  results: TaskAttemptTaskResult[];
+  correctCount: number;
+  totalCount: number;
+  percentageScore: number;
+  completedAt: string;
 }
 
 // ── Audience Practice Activities (formerly Practice Tasks) ───────────────────
@@ -379,8 +348,6 @@ export interface Course {
    * Whether the creator requested AI-generated images (resource_page / branded_guide only).
    */
   generateImages?: boolean;
-  /** Creator brand kit applied to this asset */
-  brandKit?: CreatorBrandKit;
 }
 
 /** Legacy — kept for backward compatibility */

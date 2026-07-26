@@ -4,6 +4,109 @@ import { request as nodeHttpsRequest } from 'node:https';
 import { getAuth0User } from '@/lib/auth0-session';
 import type { GeneratorInput, Module, Flashcard, QuizQuestion, PracticeTask, Course, QuizConfig, PracticeTaskConfig } from '@/lib/types';
 import { GENERATION_TIERS, DAILY_GENERATION_LIMIT } from '@/lib/types';
+import { cleanTitle } from '@/lib/cleanTitle';
+
+// ── IBM watsonx.ai IAM token fetch (node:https, signal-free) ─────────────────
+function fetchIamToken(apiKey: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const body = `grant_type=urn%3Aibm%3Aparams%3Aoauth%3Agrant-type%3Aapikey&apikey=${encodeURIComponent(apiKey)}`;
+    const req = nodeHttpsRequest(
+      {
+        hostname: 'iam.cloud.ibm.com',
+        path:     '/identity/token',
+        method:   'POST',
+        headers: {
+          'Content-Type':   'application/x-www-form-urlencoded',
+          'Content-Length': Buffer.byteLength(body),
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf8');
+          if ((res.statusCode ?? 200) >= 400) {
+            reject(new Error(`IAM token error ${res.statusCode}: ${text}`));
+            return;
+          }
+          try {
+            const parsed = JSON.parse(text) as { access_token: string };
+            resolve(parsed.access_token);
+          } catch {
+            reject(new Error('IAM returned invalid JSON'));
+          }
+        });
+        res.on('error', reject);
+      },
+    );
+    req.on('error', reject);
+    req.end(body);
+  });
+}
+
+// ── IBM Granite text generation via watsonx.ai (node:https) ──────────────────
+function granitePost(
+  watsonxUrl: string,
+  projectId: string,
+  accessToken: string,
+  modelId: string,
+  prompt: string,
+  maxNewTokens: number,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const bodyObj = {
+      model_id: modelId,
+      project_id: projectId,
+      input: prompt,
+      parameters: {
+        decoding_method: 'greedy',
+        max_new_tokens: maxNewTokens,
+        repetition_penalty: 1.05,
+      },
+    };
+    const bodyStr = JSON.stringify(bodyObj);
+    const parsed  = new URL(`${watsonxUrl}/ml/v1/text/generation?version=2023-05-29`);
+    const req = nodeHttpsRequest(
+      {
+        hostname: parsed.hostname,
+        port:     443,
+        path:     `${parsed.pathname}${parsed.search}`,
+        method:   'POST',
+        headers: {
+          'Content-Type':   'application/json',
+          Authorization:    `Bearer ${accessToken}`,
+          'Content-Length': Buffer.byteLength(bodyStr),
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf8');
+          if ((res.statusCode ?? 200) >= 400) {
+            // Surface a distinct error for the "project not linked to WML" 403
+            // so callers can skip the Granite path without retrying.
+            if (res.statusCode === 403 && text.includes('no_associated_service_instance')) {
+              reject(new Error('GRANITE_NO_WML_INSTANCE'));
+            } else {
+              reject(new Error(`Granite error ${res.statusCode}: ${text}`));
+            }
+            return;
+          }
+          try {
+            const data = JSON.parse(text) as { results?: Array<{ generated_text: string }> };
+            resolve(data.results?.[0]?.generated_text ?? '');
+          } catch {
+            reject(new Error('Granite returned invalid JSON'));
+          }
+        });
+        res.on('error', reject);
+      },
+    );
+    req.on('error', reject);
+    req.end(bodyStr);
+  });
+}
 
 // ── OpenAI via node:https (bypasses Next.js patched fetch) ────────────────────
 // Next.js patches globalThis.fetch and propagates the incoming request's
@@ -156,6 +259,66 @@ function uid(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
+// ── Server-side slug generation with collision check ─────────────────────────
+// Called just before INSERT so the uniqueness check and the write are as close
+// together as possible, eliminating the client-side race where two parallel
+// generate requests receive the same slug from make_slug and then race to save.
+function makeUniqueSlug(
+  url: string,
+  serviceKey: string,
+  title: string,
+  excludeId?: string,
+): Promise<string> {
+  const base = title.toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 60) || 'deck';
+
+  return new Promise((resolve) => {
+    // Fetch all existing slugs to find a free one.
+    const qs = excludeId
+      ? `select=slug&slug=not.is.null&id=neq.${encodeURIComponent(excludeId)}`
+      : `select=slug&slug=not.is.null`;
+    const parsed = new URL(`${url}/rest/v1/courses?${qs}`);
+    const req = nodeHttpsRequest(
+      {
+        hostname:   parsed.hostname,
+        port:       443,
+        servername: parsed.hostname,
+        path:       `${parsed.pathname}${parsed.search}`,
+        method:     'GET',
+        headers: {
+          apikey:        serviceKey,
+          Authorization: `Bearer ${serviceKey}`,
+          Accept:        'application/json',
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => {
+          try {
+            const rows = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Array<{ slug: string }>;
+            const taken = new Set(rows.map(r => r.slug).filter(Boolean));
+            let slug = base;
+            let n = 2;
+            while (taken.has(slug)) { slug = `${base}-${n}`; n++; }
+            resolve(slug);
+          } catch {
+            // Fallback: append a short random suffix so the INSERT never conflicts
+            resolve(`${base}-${Date.now().toString(36)}`);
+          }
+        });
+        res.on('error', () => resolve(`${base}-${Date.now().toString(36)}`));
+      },
+    );
+    req.on('error', () => resolve(`${base}-${Date.now().toString(36)}`));
+    req.end();
+  });
+}
+
 function blankCourse(partial: Partial<Course> = {}): Course {
   return {
     id: uid(), title: 'Untitled', description: '',
@@ -184,31 +347,44 @@ export interface ContentAnalysis {
   suggestedTitle: string;
 }
 
+// Set to true the first time we get a GRANITE_NO_WML_INSTANCE error so that
+// subsequent requests in the same process lifetime skip the IAM + Granite round-trip.
+let _graniteNoWml = false;
+
+// ── Stage 1: full-source analysis with IBM Granite 3.0 ───────────────────────
+// Reads 100% of the transcript across Granite's 128K context window.
+// Returns a comprehensive JSON blueprint that Stage 2 (GPT) uses for generation.
 async function analyzeContent(
   transcript: string,
   supplemental: string,
-  apiKey: string,
-  model: string,
+  _openaiKey: string,   // kept for signature compat, not used in Stage 1
+  _model: string,       // kept for signature compat, not used in Stage 1
 ): Promise<ContentAnalysis | null> {
+  // Short-circuit: project is not linked to a WML instance — skip every call
+  // for the rest of this process lifetime to avoid burning IAM + network time.
+  if (_graniteNoWml) return null;
+
+  const watsonxApiKey = process.env.WATSONX_API_KEY;
+  const watsonxProjectId = process.env.WATSONX_PROJECT_ID;
+  const watsonxUrl = process.env.WATSONX_URL;
+
+  // If watsonx credentials are missing, fall back to null (GPT skips analysis)
+  if (!watsonxApiKey || !watsonxProjectId || !watsonxUrl) {
+    console.warn('[analyzeContent] WATSONX credentials not set — skipping Granite analysis.');
+    return null;
+  }
+
   try {
-    // Use the full transcript — split into two halves so nothing is missed
-    const half = Math.floor(transcript.length / 2);
-    const firstHalf  = transcript.slice(0, Math.min(half + 2000, 9000));
-    const secondHalf = transcript.slice(Math.max(0, half - 1000)).slice(0, 9000);
-    const extra = supplemental ? `\n\nSUPPLEMENTAL MATERIAL:\n${supplemental.slice(0, 2000)}` : '';
+    const accessToken = await fetchIamToken(watsonxApiKey);
 
-    const src = `--- FIRST HALF ---\n${firstHalf}\n\n--- SECOND HALF (may overlap) ---\n${secondHalf}${extra}`;
+    // Pass the FULL transcript — no truncation — Granite 3.0 has 128K context.
+    const extra = supplemental ? `\n\nSUPPLEMENTAL MATERIAL:\n${supplemental}` : '';
+    const src   = `${transcript}${extra}`;
 
-    const data = await openaiPost(apiKey, '/v1/chat/completions', {
-      model,
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a senior curriculum analyst. Return ONLY valid JSON — no markdown, no code fences.',
-        },
-        {
-          role: 'user',
-          content: `Read this educational content IN FULL — both halves — and extract a comprehensive topic outline. Your goal is to capture EVERY significant topic covered, not just the first few.
+    const prompt = `<|system|>
+You are a senior curriculum analyst. Return ONLY valid JSON — no markdown, no code fences.
+<|user|>
+Read the ENTIRE educational content below from start to finish. Extract every distinct, substantive topic that receives real coverage. This blueprint will drive exact section/question/card counts in the final output — precision is critical.
 
 CONTENT:
 ${src}
@@ -218,50 +394,71 @@ Return JSON exactly as:
   "domain": "The precise subject domain (e.g. 'Python Programming', 'Personal Finance', 'Cell Biology')",
   "keyTopics": [
     {
-      "topic": "Exact topic name as covered in the content",
-      "description": "One sentence: what specifically this topic covers here",
-      "subtopics": ["specific sub-concept 1", "specific sub-concept 2", "specific sub-concept 3", "specific sub-concept 4"],
-      "keyFacts": ["A specific fact, rule, or formula from this topic", "Another distinct fact", "A third fact"],
+      "topic": "Exact topic name as taught in the content — not a generic label",
+      "description": "One sentence: what specifically this topic explains, demonstrates, or argues",
+      "subtopics": ["specific sub-concept 1", "specific sub-concept 2", "specific sub-concept 3"],
+      "keyFacts": ["A concrete fact, rule, formula, or skill from this topic", "Another distinct fact", "A third distinct fact"],
       "weight": 2
     }
   ],
-  "conceptsToTest": ["Specific testable concept 1", "Specific testable concept 2", "...up to 15 concepts"],
+  "conceptsToTest": ["Specific testable concept 1", "Specific testable concept 2"],
   "difficultySignals": "One sentence describing assumed prior knowledge and complexity level",
   "suggestedTitle": "A short, specific title for a learning asset on this content"
 }
 
-RULES — critical:
-- Extract EVERY topic that gets meaningful coverage — aim for 5–10 topics. Do not stop at 3.
-- Read the SECOND HALF carefully — content often covers different topics in its second half.
-- subtopics: list 3–5 specific sub-concepts per topic (not generic terms like "overview" or "basics").
-- keyFacts: list 2–4 specific, concrete facts, rules, or formulas stated in the content for this topic.
-- weight: 1 = briefly mentioned, 2 = covered in moderate depth, 3 = core focus of the content.
-- conceptsToTest: list up to 15 specific, actionable things — things a learner should be able to DO or EXPLAIN. Be granular.
-- Never include generic topics like "Introduction" unless the content is genuinely only introductory.`,
-        },
-      ],
-      max_completion_tokens: 2500,
-    }) as { choices: Array<{ message: { content: string } }> };
-    const raw = data.choices[0].message.content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+EXTRACTION RULES — non-negotiable:
+1. Scan the FULL source — beginning, middle, AND end. Do not bias toward opening paragraphs.
+2. List EVERY topic that receives substantive, non-trivial coverage — typically 5–12 topics for a 10–30 min source.
+3. NEVER include generic filler entries: no "Introduction", "Overview", "Conclusion", "Summary", "Recap", "What We Covered", or "Next Steps" unless that segment teaches entirely new, standalone facts.
+4. Each topic in keyTopics must be DISTINCT — no two topics should substantially overlap.
+5. subtopics: 2–4 specific sub-concepts per topic (concrete terms, not "basics" or "examples").
+6. keyFacts: 2–4 specific, concrete facts, rules, formulas, or skills per topic — things a learner can be directly tested on.
+7. weight: 1 = briefly covered (1–2 min), 2 = moderate depth (3–5 min), 3 = core focus (5+ min or repeated emphasis).
+8. conceptsToTest: list up to 20 granular, actionable items — what a learner should be able to DO or EXPLAIN after this source.
+9. The total number of keyTopics is your authoritative count N. The generation stage will create exactly N sections — so make every entry count and omit nothing real.
+<|assistant|>
+`;
+
+    const rawText = await granitePost(
+      watsonxUrl,
+      watsonxProjectId,
+      accessToken,
+      'ibm/granite-3-20b-instruct',
+      prompt,
+      3000,
+    );
+
+    const raw = rawText.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
     return JSON.parse(raw) as ContentAnalysis;
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && err.message === 'GRANITE_NO_WML_INSTANCE') {
+      _graniteNoWml = true;
+      console.warn('[analyzeContent] Granite project has no WML instance — disabling Granite for this session. Fix: associate a WML service instance with project', watsonxProjectId);
+    } else {
+      console.error('[analyzeContent] Granite stage failed:', err instanceof Error ? err.message : err);
+    }
     return null;
   }
 }
 
 // ── Format analysis as an enforced coverage blueprint ────────────────────────
 
+// itemCount is kept for quiz/activity fixed-count modes; ignored when null (AI mode).
 function formatAnalysisBlock(analysis: ContentAnalysis, itemCount?: number): string {
   // Sort topics by weight descending so high-weight topics appear first
   const sorted = [...analysis.keyTopics].sort((a, b) => (b.weight ?? 1) - (a.weight ?? 1));
+  const N = sorted.length;
 
-  // Compute per-topic item allocation if itemCount provided
+  // When a fixed itemCount is given, compute a weight-proportional per-topic allocation.
+  // In AI (dynamic) mode, itemCount is undefined — each topic gets exactly 1 section/item.
   const totalWeight = sorted.reduce((s, t) => s + (t.weight ?? 1), 0);
   const topicsText = sorted.map((t, i) => {
     const allocation = itemCount
       ? Math.max(1, Math.round(((t.weight ?? 1) / totalWeight) * itemCount))
-      : null;
-    const allocationStr = allocation ? ` → generate ${allocation} item${allocation > 1 ? 's' : ''} for this topic` : '';
+      : 1; // dynamic mode: exactly 1 section per topic
+    const allocationStr = itemCount
+      ? ` → generate ${allocation} item${allocation > 1 ? 's' : ''} for this topic`
+      : ' → generate EXACTLY 1 section for this topic';
     return [
       `  ${i + 1}. [${t.weight === 3 ? 'CORE' : t.weight === 2 ? 'IMPORTANT' : 'SUPPORTING'}] ${t.topic}${allocationStr}`,
       `     What it covers: ${t.description}`,
@@ -270,27 +467,57 @@ function formatAnalysisBlock(analysis: ContentAnalysis, itemCount?: number): str
     ].join('\n');
   }).join('\n\n');
 
+  const dynamicCountLine = itemCount
+    ? `Fixed count mode: generate ${itemCount} items total, distributed across topics as indicated above.`
+    : `Dynamic count mode: generate EXACTLY ${N} sections/modules/groups — one per topic listed above. No more, no fewer.`;
+
   return `
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CONTENT ANALYSIS — MANDATORY COVERAGE BLUEPRINT
+CONTENT BLUEPRINT — MANDATORY COVERAGE (${N} TOPICS → ${itemCount ?? N} OUTPUT SECTIONS)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Domain: ${analysis.domain}
 Difficulty: ${analysis.difficultySignals}
+${dynamicCountLine}
 
-TOPICS TO COVER — ALL of these must appear in your output:
+TOPICS — generate output for EVERY one of these, in order:
 ${topicsText}
 
 SPECIFIC CONCEPTS TO TEST (use these as the basis for individual items):
 ${analysis.conceptsToTest.map((c, i) => `  ${i + 1}. ${c}`).join('\n')}
 
-COVERAGE RULES — non-negotiable:
-1. Every topic marked [CORE] or [IMPORTANT] MUST have at least one item generated for it.
-2. [SUPPORTING] topics should each have at least one item unless the total count is very small.
-3. Do NOT generate multiple items about the same narrow sub-concept.
-4. Spread items across the full content — do not cluster on the first topic.
-5. Use the keyFacts listed above as the basis for specific, accurate items.
+ANTI-FLUFF RULES — absolute, no exceptions:
+1. Generate EXACTLY 1 section per topic listed. Do NOT merge topics. Do NOT split one topic into multiple sections.
+2. Every item must teach or test a SPECIFIC fact, rule, formula, or skill from the keyFacts/subtopics above — no generic padding.
+3. Do NOT generate content for topics NOT in this blueprint (no invented topics, no generic intros/outros).
+4. Do NOT omit any topic — every entry above must appear in the output.
+5. If two topics seem similar, keep them as separate sections — each covers different keyFacts.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`.trim();
 }
+
+// ── Anti-meta-trivia rule — injected into every prompt type ──────────────────
+// Prevents gpt-5.4 from generating questions/cards about document structure,
+// slide timing, presenter notes, future plans, or content metadata.
+
+const ANTI_META_TRIVIA_RULES = `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DOMAIN FOCUS RULES — absolute, no exceptions
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Focus 100% on domain principles, definitions, rules, and formulas.
+
+FORBIDDEN — never generate any item that:
+  🚫 Questions WHY something is shown, timed, or structured in the source material
+     e.g. "Why does the guide show a guidance time?", "Why is this step highlighted?"
+  🚫 Asks about future plans, upcoming features, or roadmap items mentioned in passing
+     e.g. "What future device is planned?", "What will be added next?"
+  🚫 References document/slide structure, metadata, or presentation choices
+     e.g. "What is the purpose of the overview section?", "How many slides cover X?"
+  🚫 Tests knowledge of the source FORMAT rather than the subject matter
+     e.g. "What does the introduction say about...?", "According to the summary..."
+  🚫 Repeats the same domain concept already covered by another item in the set
+
+Every item front/question MUST test a real, substantive domain concept:
+  a concrete definition, rule, formula, mechanism, process, or skill
+  that a practitioner of this field would need to know.`.trim();
 
 // ── Universal "what to review" rule — injected into every prompt type ─────────
 
@@ -340,14 +567,20 @@ function buildPrompt(input: GeneratorInput, analysis: ContentAnalysis | null): {
   const { tone, quizDifficulty, learnerLevel, contentType } = options;
 
   const ctx = `Use a ${tone} tone and target ${learnerLevel} audience members.`;
-  const src = `\n\nSOURCE CONTENT:\n${transcript.slice(0, 14000)}${supplemental ? `\n\nSUPPLEMENTAL:\n${supplemental.slice(0, 2000)}` : ''}`;
+  // Pass the full transcript — Granite's blueprint already covers everything;
+  // GPT uses it as grounding context with no artificial truncation.
+  const src = `\n\nSOURCE CONTENT:\n${transcript}${supplemental ? `\n\nSUPPLEMENTAL:\n${supplemental}` : ''}`;
   const base = 'Base ALL content directly on the source material. Never use generic placeholders. Never reference "the video", "the transcript", "the source", or "the content" directly.';
 
-  // Determine AI-decided count instruction from analysis
+  // Derive the exact section/item count from Granite's blueprint (N topics = N sections).
+  // When Granite is unavailable, gpt-5.4 has full autonomy — no hardcoded fallback count.
   const topicCount = analysis?.keyTopics?.length ?? 0;
   const aiCountInstruction = topicCount > 0
-    ? `You have ${topicCount} key topics identified above. Generate exactly ONE high-quality item per distinct key topic or major sub-concept — no more than 2 items per topic, no topic left without coverage. Total should be between ${topicCount} and ${Math.min(topicCount * 2, 20)}.`
-    : `Analyse the content yourself and generate one item per distinct key concept. Stop when every important concept is covered — do not pad.`;
+    ? `The Content Blueprint above lists exactly ${topicCount} distinct topics. Generate EXACTLY ${topicCount} sections/modules — one per topic, no merging, no splitting, no additions. Every section must be grounded in that topic's keyFacts and sub-concepts. Zero filler.`
+    : `Analyse the full source content yourself. Identify every distinct, substantive topic that receives real coverage. Generate exactly one section per topic — as many as the content warrants. Do not add generic intro/outro/summary sections. Do not pad. Do not artificially limit the count.`;
+
+  // Injected into every prompt: forbid any prefix in the title field.
+  const NO_PREFIX_TITLE_RULE = 'TITLE RULE — absolute: The "title" field must contain ONLY the clean subject name (e.g. \'Python Programming Foundations\', \'Personal Finance Basics\'). NEVER prefix it with "Branded Resource:", "Branded Guide:", "Branded Content Guide:", "Illustrated Explainer:", "Resource Page:", or any other label. If you include a prefix the output will be rejected.';
 
   const system = 'You are an expert content strategist and creator assistant. Return ONLY valid JSON — no markdown, no code fences, no explanation.';
 
@@ -355,47 +588,84 @@ function buildPrompt(input: GeneratorInput, analysis: ContentAnalysis | null): {
   if (contentType === 'review_cards') {
     const { flashcardCount } = options;
     const isAi = flashcardCount === undefined || flashcardCount === 0 || (flashcardCount as unknown) === 'ai';
-    const analysisBlock = analysis ? `\n\n${formatAnalysisBlock(analysis, isAi ? undefined : (flashcardCount as number))}` : '';
+    const analysisBlock = analysis ? `\n\n${formatAnalysisBlock(analysis)}` : '';
+
+    // Fixed count: spread evenly across however many modules GPT decides to use.
+    // AI count: analyse ALL topics, pick the most important ones, hard cap at 25 cards.
     const countInstruction = isAi
-      ? (analysis
-          ? `Based on the Content Analysis above: ${aiCountInstruction} Each card covers one key concept or sub-concept from the blueprint.`
-          : `Identify only the concepts a reader absolutely must know. Generate as few cards as needed — most content warrants 5–10 cards. Only go higher if the content genuinely contains more distinct key ideas.`)
-      : `Generate exactly ${flashcardCount} review cards. No more, no fewer.`;
+      ? `CARD COUNT: Analyse every topic in the source. Identify the most important concepts a learner must know. Generate between 12 and 25 cards in total — NEVER exceed 25. Prioritise the highest-impact concepts; if there are more than 25 candidates, select the 25 most essential and discard the rest. Every card must cover a distinct concept; never repeat the same idea twice.`
+      : `CARD COUNT: Generate exactly ${Math.min(flashcardCount as number, 25)} cards in total, distributed evenly across modules.`;
+
     return {
       system,
-      user: `You are creating tightly curated Quick Review Cards for a creator's audience. Extract only the most critical key ideas — the handful of concepts that define this topic. Think of it as the 20% of knowledge that gives 80% of understanding.
+      user: `You are creating a high-quality Quick Review flashcard deck for a creator's audience. Your job is to distil the source into a clean, high-density deck of self-contained cards that learners can actually study from.
 
 ${ctx} ${base}${analysisBlock}${src}
 
-STRICT RULES FOR EVERY CARD:
-- front: one term, concept, or short question — MAX 8 words.
-- back: the answer or definition — MAX 10 words. One crisp phrase. No filler.
-- Never reference "the video", "the transcript", "the source", or "the content".
-- Never write meta-questions like "What is the main purpose of...".
-- Each card must teach a single self-contained idea.
-- When in doubt about whether to include a card, cut it.
+${ANTI_META_TRIVIA_RULES}
 
-Good: { "front": "What is a stock?", "back": "A share of ownership in a company." }
-Bad:  { "front": "What are all the different types of investments mentioned?", "back": "There are stocks, bonds, index funds, ETFs, and target retirement funds discussed." }
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MODULE STRUCTURE — mandatory
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Group all cards into 1 to 3 high-level thematic modules. Choose module titles that reflect natural phases of the subject — for example:
+  • "Foundations" / "Core Concepts" / "Advanced Applications"
+  • "Part 1: Basics" / "Part 2: Techniques" / "Part 3: Mastery"
+  • A single module named after the subject itself when content is focused
+
+Rules:
+- NEVER create more than 3 modules. If the source is narrow/focused, use 1 module.
+- NEVER create a separate module per card or per minor subtopic.
+- Distribute cards roughly evenly across modules — no module should have fewer than 3 cards unless it is the only module.
+- Module titles must be broad, meaningful groupings — NOT verbatim topic names from the blueprint.
 
 ${countInstruction}
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CARD QUALITY RULES — mandatory for every card
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- front: a clear term, concept name, or direct question — MAX 10 words. No filler words.
+- back: a clear, accurate 1–2 sentence definition or explanation — MAX 25 words. State the answer directly and confidently.
+- Every card must test exactly ONE self-contained domain concept, definition, rule, formula, or mechanism.
+- Cards must be self-contained — a learner studying this card alone should be able to understand it without context.
+- NEVER create cards about document/presentation structure, slide timing, or source metadata.
+- NEVER write vague or generic cards (e.g. "What is the topic?", "Name an example.").
+- NEVER repeat the same concept across two cards.
+
+Good examples:
+  { "front": "What is a stock?", "back": "A share of ownership in a company, entitling the holder to a portion of profits and assets." }
+  { "front": "Compound interest formula", "back": "A = P(1 + r/n)^nt — interest calculated on principal plus previously earned interest." }
+  { "front": "What does DNS stand for?", "back": "Domain Name System — translates human-readable domain names into IP addresses." }
+
+Bad examples (banned):
+  { "front": "What are all the types of investments mentioned?", "back": "There are stocks, bonds, ETFs discussed." }
+  { "front": "Why does the guide show guidance time?", "back": "To help learners plan their study." }
+
 ${UNIVERSAL_REVIEW_NOTE_RULES}
 
-Return JSON:
+${NO_PREFIX_TITLE_RULE}
+
+Return valid JSON in EXACTLY this shape — nothing else:
 {
-  "title": "Concise deck title — the actual subject, e.g. 'Investing Basics'",
-  "description": "One sentence: what key ideas this deck covers for the creator's audience",
-  "modules": [{
-    "title": "Topic name",
-    "objective": "",
-    "lessonNotes": "",
-    "examples": "",
-    "flashcards": [{"front": "Short term or question — max 8 words", "back": "Short answer — max 10 words", "reviewNote": "The specific concept, rule, or formula to look up if this card is confusing — follow REVIEW NOTE RULES above."}],
-    "quizQuestions": [],
-    "practiceTasks": []
-  }],
-  "learningGoals": ["Key ideas audience members will remember"],
+  "title": "Clean subject name only — e.g. 'Python Programming Foundations', 'Personal Finance Basics'. No prefix.",
+  "description": "One sentence: what domain concepts this deck covers and who it is for.",
+  "modules": [
+    {
+      "title": "Module name — a broad thematic grouping (e.g. 'Foundations', 'Core Principles')",
+      "objective": "",
+      "lessonNotes": "",
+      "examples": "",
+      "flashcards": [
+        {
+          "front": "Term or question — max 10 words",
+          "back": "Definition or answer — max 25 words, 1–2 sentences",
+          "reviewNote": "Follow REVIEW NOTE RULES. The specific concept, rule, or formula to look up if this card is confusing."
+        }
+      ],
+      "quizQuestions": [],
+      "practiceTasks": []
+    }
+  ],
+  "learningGoals": ["3–5 specific domain concepts the audience will understand after studying this deck"],
   "finalProject": {"title": "", "description": "", "deliverables": []},
   "creatorImprovementNotes": "",
   "shareText": "Ready-to-post caption for the creator's platform"
@@ -409,14 +679,16 @@ Return JSON:
     const audience  = cfg?.targetAudience ?? learnerLevel;
     const diff      = cfg?.difficulty     ?? quizDifficulty;
     const isAiCount = cfg?.questionCount === 'ai';
-    const count     = typeof cfg?.questionCount === 'number' ? cfg.questionCount : (isAiCount ? null : 10);
+    // In AI mode, count = blueprint topics capped at 25; human custom capped at 50.
+    const rawCount  = typeof cfg?.questionCount === 'number' ? cfg.questionCount : (isAiCount ? null : (topicCount > 0 ? topicCount : null));
+    const count     = rawCount !== null ? Math.min(rawCount, isAiCount ? 25 : 50) : null;
     const types     = cfg?.questionTypes ?? ['multiple_choice', 'true_false', 'multiple_select'];
     const title     = cfg?.quizTitle ? `The quiz title must be exactly: "${cfg.quizTitle}".` : 'Choose an appropriate quiz title from the content.';
     const analysisBlock = analysis ? `\n\n${formatAnalysisBlock(analysis, isAiCount ? undefined : (count ?? undefined))}` : '';
     const countInstruction = isAiCount
       ? (analysis
-          ? `Based on the Content Analysis above: ${aiCountInstruction} Distribute questions evenly across all key topics.`
-          : `Determine the right number of questions yourself — one question per distinct key concept. Do not pad with repetitive questions.`)
+          ? `DYNAMIC COUNT: ${aiCountInstruction} Write one question per topic — distribute question types evenly. HARD CAP: never exceed 25 questions total.`
+          : `Analyse the full source content. Identify every distinct, substantive topic. Write exactly one question per topic — up to 25 questions maximum. Never exceed 25.`)
       : `Write exactly ${count} questions.`;
 
     const typeInstructions = types.map(t => {
@@ -437,6 +709,8 @@ Return JSON:
 Target audience: ${audience}. ${diffInstruction}
 ${title}
 ${analysisBlock}
+
+${ANTI_META_TRIVIA_RULES}
 
 QUESTION TYPES ALLOWED (distribute evenly across types if multiple selected):
 ${typeInstructions}
@@ -466,11 +740,13 @@ ${UNIVERSAL_REVIEW_NOTE_RULES}
 CORRECT ANSWER PLACEMENT — critical:
 - The correct answer MUST be placed at a RANDOM position (index 0, 1, 2, or 3) across questions.
 - Do NOT put the correct answer in position 0 for every question.
-- Across all ${count} questions, distribute correctAnswer values roughly evenly: some 0s, some 1s, some 2s, some 3s.
+- Distribute correctAnswer values roughly evenly across all questions: some 0s, some 1s, some 2s, some 3s.
+
+${NO_PREFIX_TITLE_RULE}
 
 Return JSON:
 {
-  "title": "Quiz title",
+  "title": "The actual subject name only — e.g. 'Python Fundamentals Quiz'. No prefix.",
   "description": "One sentence: what this quiz assesses for the creator's audience",
   "modules": [{
     "title": "Quiz",
@@ -504,16 +780,19 @@ Return JSON:
     const audience    = taskCfg?.learnerLevel ?? learnerLevel;
     const difficulty  = taskCfg?.difficulty   ?? 'mixed';
     const isAiCount   = taskCfg?.taskCount === 'ai';
+    // AI mode: no cap (AI judges from content). Custom/preset: hard cap at 15.
     const count       = taskCfg
-      ? (taskCfg.taskCount === 'custom' ? (taskCfg.customTaskCount ?? 8) : (isAiCount ? null : (typeof taskCfg.taskCount === 'number' ? taskCfg.taskCount : 8)))
-      : 8;
+      ? (taskCfg.taskCount === 'custom'
+          ? Math.min(taskCfg.customTaskCount ?? topicCount ?? 15, 15)
+          : (isAiCount ? null : Math.min(typeof taskCfg.taskCount === 'number' ? taskCfg.taskCount : (topicCount > 0 ? topicCount : 15), 15)))
+      : (topicCount > 0 ? topicCount : null);
     const includeHints = taskCfg?.includeHints ?? true;
     const analysisBlock = analysis ? `\n\n${formatAnalysisBlock(analysis, isAiCount ? undefined : (typeof count === 'number' ? count : undefined))}` : '';
     const taskCountInstruction = isAiCount
       ? (analysis
-          ? `Based on the Content Analysis above: ${aiCountInstruction} Each task covers a distinct key topic or sub-concept. Spread tasks evenly across ALL topics listed in the blueprint — do not generate multiple tasks for the same topic before covering every other topic at least once.`
-          : `Determine the right number of tasks yourself — one task per distinct key concept. Do not pad.`)
-      : `Generate exactly ${count} activities. Spread them evenly across ALL key topics — do not cluster multiple tasks on the same topic while leaving others uncovered.`;
+          ? `DYNAMIC COUNT: ${aiCountInstruction} Create exactly one section per topic and place one task per section. Do NOT generate multiple tasks for one topic while skipping another.`
+          : `Analyse the full source content. Identify every distinct, substantive topic. Create one section per topic with exactly one task — as many sections as the content warrants. No artificial cap. Do not pad with filler tasks.`)
+      : `Generate exactly ${count} activities — one section per key topic, tasks spread evenly. Do not cluster multiple tasks on the same topic while leaving others uncovered.`;
 
     const diffInstruction = difficulty === 'mixed'
       ? `Generate a MIXTURE of difficulty levels: roughly 1/3 beginner (foundational recall and identification), 1/3 intermediate (application and analysis), and 1/3 challenge (synthesis, evaluation, and creation). Label each task's "difficulty" field accordingly.`
@@ -527,6 +806,8 @@ Return JSON:
       system,
       user: `You are an expert hands-on practice designer. ${taskCountInstruction} Your job is to make learners DO things — not describe things.
 ${analysisBlock}
+
+${ANTI_META_TRIVIA_RULES}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 STEP 1 — DETECT THE SUBJECT DOMAIN
@@ -640,13 +921,15 @@ Target audience: ${audience}. ${diffInstruction}
 
 ${hintInstruction}
 
-Generate exactly ${count ?? 8} activities total. ${analysis && analysis.keyTopics.length > 1
-  ? `Create one section per key topic from the Coverage Blueprint above — every topic that appears in the blueprint MUST become its own section with at least one task. Do NOT merge topics into a single section. Section titles must match the topic names from the blueprint.`
-  : (count ?? 8) > 4 ? 'Group related activities into 2–3 thematic sections.' : 'Put all activities in a single section.'} ${base}${src}
+${analysis && analysis.keyTopics.length > 0
+  ? `SECTION STRUCTURE — mandatory: Create EXACTLY ${analysis.keyTopics.length} sections — one per topic from the blueprint above. Section titles must match the blueprint topic names exactly. Do NOT merge topics. Do NOT split one topic across multiple sections. Do NOT add extra sections beyond the blueprint.`
+  : 'Create one section per distinct topic you identify in the source. Do not add generic intro or summary sections.'} ${base}${src}
+
+${NO_PREFIX_TITLE_RULE}
 
 Return JSON shaped EXACTLY as follows:
 {
-  "title": "Audience Practice Activities: [specific topic from the content]",
+  "title": "[specific topic from the content] — Practice Activities",
   "description": "One sentence: what skills audience members will practise",
   "modules": [
     {
@@ -688,12 +971,16 @@ Return JSON shaped EXACTLY as follows:
       system,
       user: `Create a comprehensive Branded Content Guide for a creator's audience from the source content. ${ctx} ${base}${analysisBlock}${src}
 
+${ANTI_META_TRIVIA_RULES}
+
 This is a polished, branded guide that belongs to the creator — not a generic template. Write it as an expert explaining the topic directly and confidently.
 
 The output must be a single JSON object shaped EXACTLY as follows. Every field is required. Base all content directly on the source — never use placeholders.
 
+${NO_PREFIX_TITLE_RULE}
+
 {
-  "title": "Specific guide title based on the content",
+  "title": "The actual subject name only — e.g. 'Personal Finance Fundamentals'. No prefix.",
   "description": "One sentence: what this guide covers and who it is for",
   "learningGoals": ["3–5 specific outcomes the audience will achieve"],
   "shareText": "Short social caption for the creator's platform",
@@ -768,28 +1055,34 @@ The output must be a single JSON object shaped EXACTLY as follows. Every field i
 
 ${UNIVERSAL_REVIEW_NOTE_RULES}
 
-RULES:
-- Create 3–5 sections inside pdfPack.sections. Each section covers one distinct subtopic.
+SECTION COUNT RULES — mandatory:
+- Create EXACTLY ${topicCount > 0 ? topicCount : 'as many'} sections inside pdfPack.sections — one per topic listed in the Content Blueprint above.${topicCount > 0 ? ` That is ${topicCount} section${topicCount > 1 ? 's' : ''} total.` : ' Generate as many sections as the content warrants — no hardcoded cap.'}
+- Do NOT create fewer sections by merging topics. Do NOT create extra sections beyond the blueprint.
+- Each section must cover ONE topic's keyFacts and subtopics — no generic "Introduction" or "Summary" sections.
+- Keep section notes concise and high-density: 150–250 words per section so all topics fit within the output window without truncation.
 - comparisonTable is REQUIRED for at least one section where two related concepts can be meaningfully compared. Set to null for sections where no comparison applies.
 - Every section must have at least 2 keyTerms, 1 workedExample with at least 3 steps, and 3 reviewQuestions.
-- notes must be substantive — 400–600 words minimum per section.
 - Never write "the source says", "the video mentions", or any similar phrase anywhere.
 - Never use the word "student", "pupil", or "course". Use "audience", "reader", or "creator's audience" instead.`,
     };
   }
 
-  // ── Branded Resource Page ──────────────────────────────────────────────────
+  // ── Illustrated Explainer (resource_page) ─────────────────────────────────
   if (contentType === 'resource_page') {
     const analysisBlock = analysis ? `\n\n${formatAnalysisBlock(analysis)}` : '';
     return {
       system,
-      user: `Create a Branded Resource Page content structure from the source content. ${ctx} ${base}${analysisBlock}${src}
+      user: `Create an Illustrated Explainer content structure from the source content. ${ctx} ${base}${analysisBlock}${src}
+
+${ANTI_META_TRIVIA_RULES}
 
 Each section must cover ONE distinct concept or topic from the source. Write the content as an expert explaining the concept directly to the creator's audience — never say "the source says", "the video mentions", or any similar phrase. Just explain the concept clearly and confidently in your own words.
 
 Return JSON:
+${NO_PREFIX_TITLE_RULE}
+
 {
-  "title": "Branded Resource: [specific topic name]",
+  "title": "[specific topic name — e.g. 'Python Programming Foundations', 'Personal Finance Basics'. NO prefix.]",
   "description": "A one-sentence summary of what this resource covers for the creator's audience",
   "modules": [
     {
@@ -812,7 +1105,9 @@ Return JSON:
 ${UNIVERSAL_REVIEW_NOTE_RULES}
 
 STRICT RULES:
-- 4–8 sections total, one concept per section only.
+- Create EXACTLY ${topicCount > 0 ? topicCount : 'as many'} sections — one per topic from the Content Blueprint above.${topicCount > 0 ? ` That is ${topicCount} section${topicCount > 1 ? 's' : ''} total — no more, no fewer.` : ' Generate as many sections as the content warrants — no hardcoded cap. Match every distinct topic you identify.'}
+- Do NOT merge topics. Do NOT add extra sections. Do NOT create generic "Introduction" or "Summary" sections.
+- Each section's lessonNotes must be 150–250 words — dense and specific, grounded in that topic's keyFacts from the blueprint.
 - lessonNotes must NEVER contain "the source", "the video", "the transcript", "the content", "highlights", "mentions", "describes", or "presents".
 - examples field must contain exactly "IMAGEQUERY:" followed by one precise search term.
 - No flashcards, no quizQuestions, no practiceTasks.
@@ -856,9 +1151,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json() as {
       input: GeneratorInput;
-      userId?: string;
       // client-side extras applied to the saved row
-      brandKit?: Record<string, unknown>;
       flashcardOptions?: Record<string, unknown>;
       quizConfig?: Record<string, unknown>;
       taskConfig?: Record<string, unknown>;
@@ -878,19 +1171,13 @@ export async function POST(req: NextRequest) {
     const sbUrl        = process.env.NEXT_PUBLIC_SUPABASE_URL!;
     const sbServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    // ── Resolve user server-side from the Auth0 session cookie ───────────────
-    let userId: string | null = null;
-    try {
-      const auth0User = await getAuth0User();
-      userId = auth0User?.id ?? null;
-    } catch {
-      // session read failed
-    }
-    // Fallback: accept userId from body (for backward compat)
-    if (!userId && body.userId) userId = body.userId;
+    // ── Require a verified server-side Auth0 session ─────────────────────────
+    // getAuth0User() reads the session cookie set by auth0.middleware — it is
+    // not spoofable from the client. We do NOT fall back to body.userId because
+    // that would let any caller impersonate an arbitrary user.
+    const auth0User = await getAuth0User();
+    const userId = auth0User?.id ?? null;
 
-    // Must be authenticated — we need userId to save the course.
-    // Without it the row is never written and the redirect lands on "Not found".
     if (!userId) {
       return NextResponse.json({ error: 'Not authenticated. Please sign in and try again.' }, { status: 401 });
     }
@@ -910,10 +1197,12 @@ export async function POST(req: NextRequest) {
     // ── Pick model tier (always standard) ────────────────────────────────────
     const tier = GENERATION_TIERS.find(t => t.id === 'standard')!;
 
-    // ── Step 1: analyse content to extract key topics ────────────────────────
+    // ── Stage 1: IBM Granite 3.0 full-source analysis (128K context, no truncation) ──
+    // Granite reads 100% of the transcript/PDF and returns a comprehensive
+    // topic blueprint covering the beginning, middle, AND end of the source.
     const analysis = await analyzeContent(input.transcript, input.supplemental, apiKey, tier.model);
 
-    // ── Step 2: build the main generation prompt using the analysis ───────────
+    // ── Stage 2: GPT generation driven by Granite's full-coverage blueprint ──
     const { system, user } = buildPrompt(input, analysis);
 
     const data = await openaiPost(apiKey, '/v1/chat/completions', {
@@ -936,10 +1225,12 @@ export async function POST(req: NextRequest) {
       flashcards: (m.flashcards ?? []).map((f: Omit<Flashcard, 'id'>) => ({ ...f, id: uid() })),
       quizQuestions: (m.quizQuestions ?? []).map((q: Omit<QuizQuestion, 'id'>) => shuffleQuestionChoices({ ...q, id: uid() })),
       practiceTasks: (m.practiceTasks ?? []).map((t: Omit<PracticeTask, 'id'>) => ({ ...t, id: uid() })),
+      // Strip any title prefix from pdfPack.title saved in branded_guide modules
+      ...(m.pdfPack ? { pdfPack: { ...m.pdfPack, title: cleanTitle(m.pdfPack.title ?? '') } } : {}),
     }));
 
     const course = blankCourse({
-      title: parsed.title ?? 'Untitled',
+      title: cleanTitle(parsed.title ?? 'Untitled'),
       description: parsed.description ?? '',
       contentType: input.options.contentType,
       learnerLevel: input.options.learnerLevel,
@@ -951,9 +1242,7 @@ export async function POST(req: NextRequest) {
       ...(input.options.contentType === 'activities' && input.options.taskConfig
         ? { taskConfig: input.options.taskConfig }
         : {}),
-      // Apply client-supplied extras (brand kit, config, flags)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...(body.brandKit         ? { brandKit:         body.brandKit as any } : {}),
+      // Apply client-supplied extras (config, flags)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...(body.flashcardOptions ? { flashcardOptions: body.flashcardOptions as any } : {}),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -964,11 +1253,13 @@ export async function POST(req: NextRequest) {
       ...(body.creatorUsername  ? { creatorUsername:  body.creatorUsername } : {}),
     });
 
-    // Resolve slug after course is built so we can fall back to course.title
+    // Resolve slug server-side, just before INSERT.
+    // Generating the slug here (rather than trusting the client-supplied value)
+    // eliminates the race condition where two parallel generate requests both
+    // receive the same slug from /api/db make_slug and then collide on INSERT
+    // with "duplicate key value violates unique constraint courses_slug_key".
     if (body.slug !== undefined) {
-      course.slug = body.slug
-        || course.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 60)
-        || course.id;
+      course.slug = await makeUniqueSlug(sbUrl, sbServiceKey, course.title, course.id);
       course.status = 'published';
     }
 
@@ -997,17 +1288,11 @@ export async function POST(req: NextRequest) {
         task_config:               course.taskConfig ?? null,
         creator_username:          course.creatorUsername ?? null,
         generate_images:           course.generateImages ?? null,
-        brand_kit:                 course.brandKit ?? null,
         updated_at:                new Date().toISOString(),
       };
       // Use node:https directly — Supabase JS client uses globalThis.fetch which
       // Next.js patches to abort after the incoming request signal fires ("fetch failed").
-      let { error: saveError } = await supabaseUpsert(sbUrl, sbServiceKey, 'courses', row);
-      if (saveError?.message?.includes('brand_kit')) {
-        const { brand_kit: _d, ...rowWithout } = row;
-        void _d;
-        ({ error: saveError } = await supabaseUpsert(sbUrl, sbServiceKey, 'courses', rowWithout));
-      }
+      const { error: saveError } = await supabaseUpsert(sbUrl, sbServiceKey, 'courses', row);
       if (saveError) {
         console.error('[generate] save course', saveError.message);
         return NextResponse.json({ error: `Save failed: ${saveError.message}` }, { status: 500 });

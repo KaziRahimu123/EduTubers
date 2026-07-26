@@ -7,35 +7,35 @@ const OUTPUT_TYPES = [
   {
     icon: BookOpen,
     label: 'Flashcard Decks',
-    desc: 'Auto-generated front/back flashcards from your video or transcript — ready for your audience to study and retain key concepts.',
+    desc: 'Auto-generated flashcard decks from your video or transcript — ready for your audience to explore and engage with key ideas.',
     color: 'text-rose-600',
     bg: 'bg-rose-50',
   },
   {
     icon: CheckSquare,
-    label: 'Interactive Quizzes',
-    desc: 'Multiple-choice, true/false, and short-answer quizzes with scoring, explanations, and instant feedback tied to your content.',
+    label: 'Audience Quizzes',
+    desc: 'Multiple-choice, true/false, and multiple-select quizzes with scoring, explanations, and instant feedback tied to your content.',
     color: 'text-orange-600',
     bg: 'bg-orange-50',
   },
   {
     icon: Layout,
-    label: 'Practice Tasks',
-    desc: 'Applied exercises tailored to your content domain — coding challenges, science scenarios, finance decisions, reflection prompts.',
+    label: 'Interactive Challenges',
+    desc: 'Applied challenges tailored to your content — coding exercises, scenario walkthroughs, decision tasks, and reflection prompts.',
     color: 'text-purple-600',
     bg: 'bg-purple-50',
   },
   {
     icon: FileText,
-    label: 'Downloadable Content Guide',
-    desc: 'A printable, exportable content guide combining notes, key takeaways, definitions, and review questions from your content.',
+    label: 'Content Guide',
+    desc: 'A printable, exportable content guide combining notes, key takeaways, definitions, and discussion prompts from your content.',
     color: 'text-green-600',
     bg: 'bg-green-50',
   },
   {
     icon: Star,
-    label: 'Visual Explainer',
-    desc: 'AI-generated illustrated visual explainer — visual summaries that make your content easier to understand and remember.',
+    label: 'Illustrated Explainer',
+    desc: 'AI-illustrated explainer — section-by-section visual summaries that bring your content to life for your audience.',
     color: 'text-indigo-600',
     bg: 'bg-indigo-50',
   },
@@ -43,9 +43,9 @@ const OUTPUT_TYPES = [
 
 const CREATOR_TYPES = [
   { icon: PlayCircle,   label: 'YouTubers',            desc: 'Turn your videos into flashcard decks, quizzes, and content guides your viewers actually use.' },
-  { icon: Mic,          label: 'Podcasters',            desc: 'Convert episodes into flashcard decks, practice tasks, and downloadable content guides.' },
-  { icon: Newspaper,    label: 'Newsletter Writers',    desc: 'Turn issues into interactive quizzes and content guides that deepen audience engagement.' },
-  { icon: GraduationCap, label: 'Educators & Coaches', desc: 'Build downloadable learning materials from your lessons, lectures, and course content.' },
+  { icon: Mic,          label: 'Podcasters',            desc: 'Convert episodes into flashcard decks, interactive challenges, and content guides.' },
+  { icon: Newspaper,    label: 'Newsletter Writers',    desc: 'Turn issues into audience quizzes and content guides that deepen audience engagement.' },
+  { icon: GraduationCap, label: 'Educators & Coaches', desc: 'Build downloadable audience content from your lessons, lectures, and course content.' },
 ];
 
 export default function Home() {
@@ -57,13 +57,13 @@ export default function Home() {
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
       <section className="max-w-4xl mx-auto px-4 pt-20 pb-16 text-center">
         <div className="inline-flex items-center gap-2 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs font-semibold px-3 py-1 rounded-full mb-6">
-          <Zap size={12} /> Turn educational content into active learning
+          <Zap size={12} /> Turn your content into interactive audience experiences
         </div>
         <h1 className="text-5xl sm:text-6xl font-bold text-gray-900 dark:text-white leading-tight mb-4">
-          Your content.<br /><span className="text-blue-600">Instantly made learnable.</span>
+          Your content.<br /><span className="text-blue-600">Instantly made interactive.</span>
         </h1>
         <p className="text-lg text-gray-500 dark:text-slate-400 max-w-2xl mx-auto mb-8">
-          Paste a transcript, upload a video, or drop a PDF — EduTubers builds flashcard decks, interactive quizzes, practice tasks, content guides, and visual explainers in seconds.
+          Paste a transcript, upload a video, or drop a PDF — EduTubers builds flashcard decks, audience quizzes, interactive challenges, content guides, and illustrated explainers in seconds.
         </p>
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
           <Link href="/generate" className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors">
@@ -78,7 +78,7 @@ export default function Home() {
 
       {/* ── 5 Output Types ───────────────────────────────────────────────── */}
       <section className="max-w-6xl mx-auto px-4 py-16">
-        <h2 className="text-3xl font-bold text-center text-gray-900 dark:text-white mb-3">5 learning assets — from any content</h2>
+        <h2 className="text-3xl font-bold text-center text-gray-900 dark:text-white mb-3">5 audience-ready content formats — from any content</h2>
         <p className="text-center text-gray-500 dark:text-slate-400 text-sm mb-10">Generated from your video, podcast, article, or transcript. Editable before publishing.</p>
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {OUTPUT_TYPES.map(({ icon: Icon, label, desc, color, bg }) => (
@@ -100,8 +100,8 @@ export default function Home() {
           <div className="grid sm:grid-cols-4 gap-6">
             {[
               { step: '1', label: 'Upload your content', desc: 'Paste a transcript, upload a PDF, or drop an audio / video file up to 100 MB.' },
-              { step: '2', label: 'AI analyses it', desc: 'EduTubers extracts key concepts, definitions, and learning points automatically.' },
-              { step: '3', label: 'Get 5 learning assets', desc: 'Flashcard decks, quizzes, practice tasks, content guides, and visual explainers — all in one click.' },
+              { step: '2', label: 'IBM Granite 3.0 + GPT Pipeline', desc: 'IBM Granite 3.0 analyzes 100% of your video or PDF across a 128K context window, passing a complete topic blueprint to GPT for best-in-class asset generation.' },
+              { step: '3', label: 'Get 5 content formats', desc: 'Flashcard decks, quizzes, interactive challenges, content guides, and illustrated explainers — all in one click.' },
               { step: '4', label: 'Share with your audience', desc: 'Every asset is editable and published with its own shareable link.' },
             ].map(({ step, label, desc }) => (
               <div key={step} className="text-center">
@@ -116,8 +116,8 @@ export default function Home() {
 
       {/* ── Creator types ─────────────────────────────────────────────────── */}
       <section className="max-w-6xl mx-auto px-4 py-16">
-        <h2 className="text-3xl font-bold text-center text-gray-900 dark:text-white mb-2">Built for educational content creators</h2>
-        <p className="text-center text-gray-500 dark:text-slate-400 text-sm mb-10">Anyone who teaches, explains, or informs — EduTubers turns your content into learning.</p>
+        <h2 className="text-3xl font-bold text-center text-gray-900 dark:text-white mb-2">Built for content creators</h2>
+        <p className="text-center text-gray-500 dark:text-slate-400 text-sm mb-10">Anyone who teaches, explains, or informs — EduTubers turns your content into interactive audience experiences.</p>
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {CREATOR_TYPES.map(({ icon: Icon, label, desc }) => (
             <div key={label} className="bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 p-5 text-center">
@@ -141,9 +141,9 @@ export default function Home() {
                 'Auto-transcription for audio and video files',
                 'Flashcard decks with front/back and image support',
                 'Scored quizzes with explanations and retry options',
-                'Practice tasks tailored to your content domain',
-                'Downloadable content guide for every generation',
-                'AI-generated visual explainers with illustrations',
+                'Interactive challenges tailored to your content',
+                'Content guide for every generation',
+                'AI-illustrated explainers with section images',
                 'Each asset published with its own shareable link',
                 'Dark mode, light mode, and system appearance',
               ].map(item => (
@@ -161,8 +161,8 @@ export default function Home() {
       {/* ── CTA ──────────────────────────────────────────────────────────── */}
       <section className="bg-blue-600 py-16">
         <div className="max-w-xl mx-auto px-4 text-center">
-          <h2 className="text-3xl font-bold text-white mb-3">Turn your content into a learning experience</h2>
-          <p className="text-blue-100 mb-6 text-sm">Upload your content and generate flashcard decks, quizzes, practice tasks, content guides, and visual explainers in under 60 seconds.</p>
+          <h2 className="text-3xl font-bold text-white mb-3">Turn your content into an audience experience</h2>
+          <p className="text-blue-100 mb-6 text-sm">Upload your content and generate flashcard decks, quizzes, interactive challenges, content guides, and illustrated explainers in under 60 seconds.</p>
           <Link href="/generate" className="inline-flex items-center gap-2 px-6 py-3 bg-white text-blue-700 font-semibold rounded-lg hover:bg-blue-50 transition-colors">
             <Zap size={16} /> Get Started Free
           </Link>

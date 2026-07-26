@@ -238,8 +238,16 @@ function supabasePatchModules(
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json() as { title: string; context: string; courseId?: string; cardIndex?: number };
-    const { title, context, courseId, cardIndex } = body;
+    const body = await req.json() as {
+      title: string;
+      context: string;
+      courseId?: string;
+      cardIndex?: number;
+      sectionIndex?: number;
+      moduleIndex?: number;
+      flashcardIndex?: number;
+    };
+    const { title, context, courseId, cardIndex, sectionIndex, moduleIndex, flashcardIndex } = body;
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey?.startsWith('sk-')) {
@@ -281,10 +289,20 @@ export async function POST(req: NextRequest) {
     // Using node:https bypasses Next.js's patched globalThis.fetch (which binds
     // the incoming request's AbortSignal). After ~30 s of image generation the
     // signal fires, causing the Supabase JS client to throw "fetch failed".
-    if (courseId && cardIndex !== undefined) {
-      const sbUrl        = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-      const serviceKey   = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-      const storagePath  = `${courseId}/${cardIndex}.png`;
+    const hasServer = courseId && (
+      cardIndex !== undefined ||
+      sectionIndex !== undefined ||
+      (moduleIndex !== undefined && flashcardIndex !== undefined)
+    );
+    if (hasServer) {
+      const sbUrl       = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+      const serviceKey  = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+      // Use a collision-free storage path for each image type
+      const storagePath = (moduleIndex !== undefined && flashcardIndex !== undefined)
+        ? `${courseId}/fc-${moduleIndex}-${flashcardIndex}.png`
+        : sectionIndex !== undefined
+          ? `${courseId}/section-${sectionIndex}.png`
+          : `${courseId}/${cardIndex}.png`;
 
       const { error: upErr } = await supabaseStorageUpload(sbUrl, serviceKey, 'images', storagePath, imageBytes);
       if (upErr) {
@@ -294,20 +312,37 @@ export async function POST(req: NextRequest) {
 
       const publicUrl = `${sbUrl}/storage/v1/object/public/images/${storagePath}`;
 
-      // Record in images metadata table
-      await supabaseUpsert(sbUrl, serviceKey, 'images', {
-        course_id:    courseId,
-        card_index:   cardIndex,
-        storage_path: storagePath,
-        url:          publicUrl,
-      }, 'course_id,card_index');
-
-      // Patch imageUrl into courses.modules JSONB
+      // Patch courses.modules JSONB — fetch current value first so we don't clobber other fields
       const { modules, error: fetchErr } = await supabaseGetModules(sbUrl, serviceKey, courseId);
       if (!fetchErr && modules) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const updated: any[] = [...modules];
-        updated[cardIndex] = { ...(updated[cardIndex] ?? {}), imageUrl: publicUrl };
+
+        if (sectionIndex !== undefined) {
+          // Content guide: imageUrl lives at modules[0].pdfPack.sections[sectionIndex].imageUrl
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const mod0 = { ...(updated[0] ?? {}) } as any;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const pack = { ...(mod0.pdfPack ?? {}) } as any;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const sections: any[] = Array.isArray(pack.sections) ? [...pack.sections] : [];
+          sections[sectionIndex] = { ...(sections[sectionIndex] ?? {}), imageUrl: publicUrl };
+          mod0.pdfPack = { ...pack, sections };
+          updated[0] = mod0;
+        } else if (moduleIndex !== undefined && flashcardIndex !== undefined) {
+          // Flashcard: image lives at modules[moduleIndex].flashcards[flashcardIndex].image
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const mod = { ...(updated[moduleIndex] ?? {}) } as any;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const flashcards: any[] = Array.isArray(mod.flashcards) ? [...mod.flashcards] : [];
+          flashcards[flashcardIndex] = { ...(flashcards[flashcardIndex] ?? {}), image: publicUrl };
+          mod.flashcards = flashcards;
+          updated[moduleIndex] = mod;
+        } else {
+          // Illustrated explainer: imageUrl lives at modules[cardIndex].imageUrl
+          updated[cardIndex!] = { ...(updated[cardIndex!] ?? {}), imageUrl: publicUrl };
+        }
+
         await supabasePatchModules(sbUrl, serviceKey, courseId, updated);
       }
 

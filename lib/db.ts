@@ -12,6 +12,7 @@ import { supabase } from './supabase';
 import type {
   Course, FeedbackComment, FlashcardReview,
   QuizAttemptResult, QuizAttemptAnswer,
+  TaskAttemptResult,
 } from './types';
 
 // ── uid ───────────────────────────────────────────────────────────────────────
@@ -44,7 +45,6 @@ function rowToCourse(row: any): Course {
     taskConfig:               row.task_config ?? undefined,
     creatorUsername:          row.creator_username ?? undefined,
     generateImages:           row.generate_images ?? undefined,
-    brandKit:                 row.brand_kit ?? undefined,
     createdAt:                row.created_at,
     updatedAt:                row.updated_at,
   };
@@ -72,7 +72,6 @@ function courseToRow(course: Course, ownerId: string) {
     task_config:               course.taskConfig ?? null,
     creator_username:          course.creatorUsername ?? null,
     generate_images:           course.generateImages ?? null,
-    brand_kit:                 course.brandKit ?? null,
     updated_at:                new Date().toISOString(),
   };
 }
@@ -97,7 +96,7 @@ export async function getCurrentUserId(): Promise<string | null> {
 
 // ── DB proxy (writes) ─────────────────────────────────────────────────────────
 
-async function dbProxy<T = null>(op: string, payload: Record<string, unknown>): Promise<T | null> {
+export async function dbProxy<T = null>(op: string, payload: Record<string, unknown>): Promise<T | null> {
   try {
     const res = await fetch('/api/db', {
       method: 'POST',
@@ -106,10 +105,11 @@ async function dbProxy<T = null>(op: string, payload: Record<string, unknown>): 
       body: JSON.stringify({ op, payload }),
     });
     const json = await res.json() as { data?: T; error?: string };
-    if (!res.ok || json.error) { console.error(`dbProxy ${op}`, json.error); return null; }
+    if (!res.ok || json.error) { console.warn(`[dbProxy] ${op} error:`, json.error); return null; }
     return (json.data ?? null) as T | null;
   } catch (e) {
-    console.error(`dbProxy ${op}`, e);
+    // Network / timeout errors are swallowed — callers treat null as a no-op.
+    console.warn(`[dbProxy] ${op} fetch failed:`, e instanceof Error ? e.message : e);
     return null;
   }
 }
@@ -117,18 +117,23 @@ async function dbProxy<T = null>(op: string, payload: Record<string, unknown>): 
 // ── Courses ───────────────────────────────────────────────────────────────────
 
 export async function dbGetCourses(): Promise<Course[]> {
-  const userId = await getCurrentUserId();
-  if (!userId) return [];
-  const { data, error } = await supabase
-    .from('courses')
-    .select('*')
-    .eq('owner_id', userId)
-    .order('updated_at', { ascending: false });
-  if (error) { console.error('dbGetCourses', error); return []; }
-  return (data ?? []).map(rowToCourse);
+  const rows = await dbProxy<unknown[]>('get_courses', {});
+  if (Array.isArray(rows)) {
+    return rows.map(r => rowToCourse(r as Record<string, unknown>));
+  }
+  return [];
 }
 
 export async function dbGetCourse(id: string): Promise<Course | null> {
+  // Try the authenticated proxy first — this uses the service-role admin client
+  // on the server and can read draft courses owned by the current user.
+  // Falls back to the anon client for public/published reads (e.g. viewer pages
+  // reached by audience members who are not signed in).
+  const proxyRow = await dbProxy<Record<string, unknown>>('get_course', { id });
+  if (proxyRow) return rowToCourse(proxyRow);
+
+  // Anon fallback — will only return published rows once the permissive RLS
+  // policy is removed; used by public audience viewer pages.
   const { data, error } = await supabase
     .from('courses')
     .select('*')
@@ -143,21 +148,44 @@ export async function dbGetCourseBySlug(slug: string): Promise<Course | null> {
     .from('courses')
     .select('*')
     .eq('slug', slug)
-    .eq('status', 'published')
     .single();
   if (error || !data) return null;
   return rowToCourse(data);
 }
 
 export async function dbSaveCourse(course: Course): Promise<void> {
-  const userId = await getCurrentUserId();
-  if (!userId) { console.error('dbSaveCourse: no user'); return; }
-  const row = courseToRow(course, userId);
-  await dbProxy('upsert_course', row as Record<string, unknown>);
+  // Retry getting the user ID — Auth0 session cookies can take a moment to be
+  // available on the very first requests after page load (e.g. during image
+  // generation). Without this, the save silently no-ops and the imageUrl is lost.
+  const RETRY_DELAYS = [500, 1000, 2000, 3000];
+  let userId: string | null = null;
+  for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
+    userId = await getCurrentUserId();
+    if (userId) break;
+    if (attempt < RETRY_DELAYS.length) {
+      await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt]));
+    }
+  }
+  if (!userId) { console.warn('[dbSaveCourse] no user after retries — skipping save'); return; }
+  try {
+    const row = courseToRow(course, userId);
+    await dbProxy('upsert_course', row as Record<string, unknown>);
+  } catch (e) {
+    // Never surface save failures as red error modals — the editor keeps working.
+    console.warn('[dbSaveCourse] save failed gracefully:', e instanceof Error ? e.message : e);
+  }
 }
 
 export async function dbDeleteCourse(id: string): Promise<void> {
   await dbProxy('delete_course', { id });
+}
+
+export async function dbIncrementViews(courseId: string): Promise<void> {
+  await dbProxy('increment_views', { courseId });
+}
+
+export async function dbIncrementCompletions(courseId: string): Promise<void> {
+  await dbProxy('increment_completions', { courseId });
 }
 
 // ── Images (Supabase Storage via server proxy) ────────────────────────────────
@@ -191,13 +219,15 @@ export async function dbUploadImage(
     });
     if (!res.ok) {
       const e = await res.json().catch(() => ({})) as { error?: string };
-      console.error('dbUploadImage', e.error);
+      // Warn only — never throw. Callers treat null as "no image" and continue.
+      console.warn('[dbUploadImage] upload failed:', e.error);
       return null;
     }
     const data = await res.json() as { publicUrl?: string };
     return data.publicUrl ?? null;
   } catch (e) {
-    console.error('dbUploadImage', e);
+    // Network/fetch errors are swallowed — image generation continues without image.
+    console.warn('[dbUploadImage] fetch error:', e instanceof Error ? e.message : e);
     return null;
   }
 }
@@ -271,7 +301,6 @@ export async function dbAddFeedback(fb: Omit<FeedbackComment, 'id'>): Promise<Fe
 // ── Quiz Attempts ─────────────────────────────────────────────────────────────
 
 export async function dbGetQuizAttempts(quizId: string): Promise<QuizAttemptResult[]> {
-  const userId = await getCurrentUserId();
   const { data, error } = await supabase
     .from('quiz_attempts')
     .select('*')
@@ -289,7 +318,6 @@ export async function dbGetQuizAttempts(quizId: string): Promise<QuizAttemptResu
     completedAt:     r.completed_at,
     attemptNumber:   r.attempt_number,
   }));
-  void userId; // used for filtering in RLS context
 }
 
 export async function dbSaveQuizAttempt(attempt: QuizAttemptResult): Promise<void> {
@@ -308,6 +336,31 @@ export async function dbCountQuizAttempts(quizId: string): Promise<number> {
     .eq('quiz_id', quizId);
   if (error) return 0;
   return count ?? 0;
+}
+
+// ── Task Attempts (Interactive Challenges) ────────────────────────────────────
+
+export async function dbGetTaskAttempts(courseId: string): Promise<TaskAttemptResult[]> {
+  const { data, error } = await supabase
+    .from('task_attempts')
+    .select('*')
+    .eq('course_id', courseId)
+    .order('completed_at', { ascending: false });
+  if (error) return [];
+  return (data ?? []).map(r => ({
+    id:              r.id,
+    courseId:        r.course_id,
+    takerName:       r.taker_name ?? null,
+    results:         r.results as TaskAttemptResult['results'],
+    correctCount:    r.correct_count,
+    totalCount:      r.total_count,
+    percentageScore: r.percentage_score,
+    completedAt:     r.completed_at,
+  }));
+}
+
+export async function dbSaveTaskAttempt(attempt: Omit<TaskAttemptResult, 'id'>): Promise<void> {
+  await dbProxy('save_task_attempt', attempt as unknown as Record<string, unknown>);
 }
 
 // ── Generation quota ──────────────────────────────────────────────────────────

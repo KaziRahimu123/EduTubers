@@ -11,21 +11,28 @@ import {
 } from 'lucide-react';
 import Layout from '@/components/Layout';
 import { RichField } from '@/components/RichNotesEditor';
-import { dbGetCourse, dbSaveCourse, dbDeleteCourse, dbGetReviews, dbUploadImage, dbMakeSlug, uid } from '@/lib/db';
+import { dbGetCourse, dbSaveCourse, dbDeleteCourse, dbGetReviews, dbUploadImage, dbProxy, uid } from '@/lib/db';
+import { cleanTitle } from '@/lib/cleanTitle';
 import { encodePayload } from '@/lib/deckShare';
 import type { Course, Flashcard, FlashcardDeckOptions, FlashcardReview } from '@/lib/types';
 import clsx from 'clsx';
 
-async function generateCardImage(term: string, back: string): Promise<string | null> {
+async function generateCardImage(
+  term: string,
+  back: string,
+  courseId?: string,
+  moduleIndex?: number,
+  flashcardIndex?: number,
+): Promise<string | null> {
   try {
     const res = await fetch('/api/generate-image', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: term, context: back }),
+      body: JSON.stringify({ title: term, context: back, courseId, moduleIndex, flashcardIndex }),
     });
     if (!res.ok) return null;
-    const data = await res.json() as { dataUrl?: string };
-    return data.dataUrl ?? null;
+    const data = await res.json() as { publicUrl?: string; dataUrl?: string };
+    return data.publicUrl ?? data.dataUrl ?? null;
   } catch {
     return null;
   }
@@ -94,12 +101,12 @@ export default function FlashcardEditor() {
 
         // Fire all requests in parallel — each resolves independently
         await Promise.all(needsImage.map(async ({ f, mi, fi }) => {
-          const url = await generateCardImage(f.front, f.back);
+          // Pass courseId + moduleIndex + flashcardIndex — server patches modules[mi].flashcards[fi].image
+          const publicUrl = await generateCardImage(f.front, f.back, c.id, mi, fi);
           // Remove from generating set as each finishes
           setGeneratingImageIds(prev => { const n = new Set(prev); n.delete(f.id); return n; });
-          if (!url) return;
-          const publicUrl = await dbUploadImage(c.id, fi, url) ?? url;
-          // Update this specific card's image in state immediately as it arrives
+          if (!publicUrl) return;
+          // Update React state and save — use setCourse updater to always read latest state
           setCourse(prev => {
             if (!prev) return prev;
             const modules = prev.modules.map((m, mIdx) => {
@@ -149,14 +156,22 @@ export default function FlashcardEditor() {
     update({ modules });
   }
 
-  function addCard() {
+  function addFlashcard(modIdx = 0) {
     const modules = [...course!.modules];
     if (!modules.length) {
       modules.push({ id: uid(), title: 'Deck', objective: '', lessonNotes: '', examples: '', flashcards: [], quizQuestions: [], practiceTasks: [] });
     }
-    modules[0] = { ...modules[0], flashcards: [...modules[0].flashcards, { id: uid(), front: '', back: '' }] };
+    // Clamp to last valid module index
+    const target = Math.min(modIdx, modules.length - 1);
+    modules[target] = {
+      ...modules[target],
+      flashcards: [...modules[target].flashcards, { id: uid(), front: 'New Front Term', back: 'New Back Definition' }],
+    };
     update({ modules });
   }
+
+  // Keep the old name as an alias so all existing call sites keep working
+  const addCard = () => addFlashcard(0);
 
   function reorderCards(fromIdx: number, toIdx: number) {
     if (fromIdx === toIdx) return;
@@ -177,8 +192,24 @@ export default function FlashcardEditor() {
     update({ flashcardOptions: { ...current, ...patch } });
   }
 
-  function togglePublish() {
-    update({ status: course!.status === 'published' ? 'draft' : 'published' });
+  async function togglePublish() {
+    if (!course) return;
+    const isPublishing = course.status !== 'published';
+    let slug = course.slug;
+    if (isPublishing && (!slug || slug.trim() === '')) {
+      const res = await dbProxy<{ slug: string }>('make_slug', { title: course.title, existingCourseId: course.id });
+      slug = res?.slug ?? cleanTitle(course.title).toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 60);
+    }
+    const updated: Course = {
+      ...course,
+      status: isPublishing ? 'published' : 'draft',
+      slug,
+    };
+    setCourse(updated);
+    if (typeof flattenCards === 'function') flattenCards(updated);
+    await dbSaveCourse(updated);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
   }
 
   async function copyLink() {
@@ -195,7 +226,8 @@ export default function FlashcardEditor() {
     setEditingTitle(false);
     if (!course) return;
     // Generate/update slug when title changes
-    const slug = await dbMakeSlug(course.title, course.id);
+    const res = await dbProxy<{ slug: string }>('make_slug', { title: course.title, existingCourseId: course.id });
+    const slug = res?.slug ?? cleanTitle(course.title).toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 60);
     update({ slug });
   }
 
@@ -256,7 +288,7 @@ export default function FlashcardEditor() {
                 onClick={() => setEditingTitle(true)}
                 title="Click to edit"
               >
-                {course.title}
+                {cleanTitle(course.title)}
               </h1>
             )}
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
@@ -271,6 +303,12 @@ export default function FlashcardEditor() {
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            onClick={() => addFlashcard(0)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-purple-700 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100"
+          >
+            <Plus size={14} /> Add Flashcard
+          </button>
           <button
             onClick={() => setShowReviews(s => !s)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50"
@@ -298,37 +336,37 @@ export default function FlashcardEditor() {
         </div>
       </div>
 
-      {/* ── Public link banner — always visible once slug exists ─────────────── */}
-      {course.slug && (
-        <div className={clsx(
-          'rounded-xl p-4 mb-5 flex flex-wrap items-center gap-3 border',
-          course.status === 'published'
-            ? 'bg-green-50 border-green-200'
-            : 'bg-purple-50 border-purple-200',
-        )}>
+      {/* ── Public link banner ────────────────────────────────────────────────── */}
+      {course.status === 'published' ? (
+        <div className="rounded-xl p-4 mb-5 flex flex-wrap items-center gap-3 border bg-green-50 border-green-200">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5 mb-0.5">
-              {course.status === 'published'
-                ? <><Globe size={12} className="text-green-600" /><p className="text-xs font-semibold text-green-700">Live — shareable link</p></>
-                : <><Lock size={12} className="text-purple-500" /><p className="text-xs font-semibold text-purple-700">Draft — shareable link (only people with the link can view)</p></>
-              }
+              <Globe size={12} className="text-green-600" />
+              <p className="text-xs font-semibold text-green-700">Published — Live shareable link</p>
             </div>
-            <p className={clsx('text-sm font-mono truncate', course.status === 'published' ? 'text-green-900' : 'text-purple-900')}>
+            <p className="text-sm font-mono truncate text-green-900">
               {typeof window !== 'undefined' ? window.location.origin : 'https://edutubers.com'}/flashcards/{course.slug}
             </p>
           </div>
           <div className="flex gap-2 flex-shrink-0">
-            <button onClick={copyLink}
-              className={clsx('inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border bg-white',
-                course.status === 'published' ? 'text-green-700 border-green-200 hover:bg-green-50' : 'text-purple-700 border-purple-200 hover:bg-purple-50')}>
-              {copied ? <><CheckCircle size={12} /> Copied!</> : <><Copy size={12} /> Copy link</>}
+            <button onClick={copyLink} className="px-3 py-1.5 text-xs font-medium text-green-700 bg-white border border-green-200 rounded-lg hover:bg-green-50">
+              {copied ? 'Copied!' : 'Copy link'}
             </button>
             <a href={`/flashcards/${course.slug}`} target="_blank" rel="noopener noreferrer"
-              className={clsx('inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white rounded-lg',
-                course.status === 'published' ? 'bg-green-600 hover:bg-green-700' : 'bg-purple-600 hover:bg-purple-700')}>
+              className="px-3 py-1.5 text-xs font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 flex items-center gap-1">
               <ExternalLink size={12} /> Open
             </a>
           </div>
+        </div>
+      ) : (
+        <div className="rounded-xl p-4 mb-5 flex items-center justify-between border bg-amber-50 border-amber-200 text-amber-800">
+          <div className="flex items-center gap-2">
+            <Lock size={14} className="text-amber-600" />
+            <span className="text-xs font-medium">Draft — Publish this content to activate your public web link.</span>
+          </div>
+          <button onClick={togglePublish} className="px-3 py-1 text-xs font-semibold bg-purple-600 text-white rounded-lg hover:bg-purple-700">
+            Publish Now
+          </button>
         </div>
       )}
 
@@ -418,8 +456,8 @@ export default function FlashcardEditor() {
                 </div>
               </div>
 
-              {/* Card image — shown when includeImages is on */}
-              {fcOpts.includeImages && (
+              {/* Card image — shown when includeImages is on, or card already has an image, or is actively generating */}
+              {(fcOpts.includeImages || card.image || generatingImageIds.has(card.id)) && (
                 <CardImage
                   card={card}
                   index={i}
@@ -427,11 +465,11 @@ export default function FlashcardEditor() {
                   generatingIds={generatingImageIds}
                   onGenerate={async () => {
                     setGeneratingImageIds(s => new Set(s).add(card.id));
-                    const url = await generateCardImage(card.front, card.back);
+                    // Pass courseId + moduleIndex + flashcardIndex — server patches the correct slot
+                    const url = await generateCardImage(card.front, card.back, course.id, card.modIdx, card.cardIdx);
                     setGeneratingImageIds(s => { const n = new Set(s); n.delete(card.id); return n; });
                     if (url) {
-                      const publicUrl = await dbUploadImage(course.id, i, url) ?? url;
-                      patchFlashcard(card.modIdx, card.cardIdx, { image: publicUrl });
+                      patchFlashcard(card.modIdx, card.cardIdx, { image: url });
                     }
                   }}
                   onUpload={async (file) => {
@@ -454,13 +492,25 @@ export default function FlashcardEditor() {
         {allCards.length === 0 && (
           <div className="bg-white rounded-xl border border-gray-200 p-10 text-center">
             <p className="text-gray-400 text-sm mb-3">No cards yet.</p>
-            <button onClick={addCard}
+            <button onClick={() => addFlashcard(0)}
               className="inline-flex items-center gap-1.5 px-4 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700">
               <Plus size={14} /> Add your first card
             </button>
           </div>
         )}
       </div>
+
+      {/* Per-module "Add Flashcard" buttons — one after each module's last card */}
+      {course.modules.map((mod, mi) => (
+        <div key={mod.id ?? mi} className="mt-2 mb-4">
+          <button
+            onClick={() => addFlashcard(mi)}
+            className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm font-medium text-purple-700 border border-dashed border-purple-300 rounded-xl hover:bg-purple-50 transition-colors"
+          >
+            <Plus size={14} /> Add Flashcard{course.modules.length > 1 ? ` to "${mod.title}"` : ''}
+          </button>
+        </div>
+      ))}
 
       {/* Bottom save */}
       <div className="flex items-center justify-between pt-4">

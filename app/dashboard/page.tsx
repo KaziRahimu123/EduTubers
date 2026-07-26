@@ -25,7 +25,7 @@ export default function Dashboard() {
     <Layout>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
-        <p className="text-sm text-gray-500 dark:text-slate-400 mt-0.5">Your learning assets.</p>
+        <p className="text-sm text-gray-500 dark:text-slate-400 mt-0.5">Your content assets.</p>
       </div>
 
       {courses.length === 0 ? (
@@ -33,8 +33,8 @@ export default function Dashboard() {
           <div className="w-14 h-14 rounded-2xl bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center mx-auto mb-4">
             <Zap size={24} className="text-blue-600" />
           </div>
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">No learning assets yet</h2>
-          <p className="text-sm text-gray-500 dark:text-slate-400 mb-6">Upload your content and generate flashcard decks, quizzes, practice tasks, content guides, and visual explainers.</p>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">No content assets yet</h2>
+          <p className="text-sm text-gray-500 dark:text-slate-400 mb-6">Upload your content and generate flashcard decks, quizzes, interactive challenges, content guides, and illustrated explainers.</p>
           <button
             onClick={() => router.push('/generate')}
             className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors"
