@@ -158,10 +158,12 @@ export async function POST(req: NextRequest) {
 
   // ── get_reviews ───────────────────────────────────────────────────────────
   if (op === 'get_reviews') {
-    const { courseId } = payload as { courseId: string };
+    const { courseId, slug } = payload as { courseId: string; slug?: string };
     const sbUrl      = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-    const rows = await supabaseRestGetTable(sbUrl, serviceKey, 'flashcard_reviews', `select=id,course_id,name,comment,created_at&course_id=eq.${encodeURIComponent(courseId)}&order=created_at.desc`);
+    const s = slug || courseId;
+    const filter = `&or=(course_id.eq.${encodeURIComponent(courseId)},course_id.eq.${encodeURIComponent(s)})`;
+    const rows = await supabaseRestGetTable(sbUrl, serviceKey, 'flashcard_reviews', `select=id,course_id,name,comment,created_at${filter}&order=created_at.desc`);
     const mapped = rows.map((r: { id: string; course_id: string; name: string; comment: string; created_at: string }) => ({
       id: r.id, deckId: r.course_id, name: r.name, comment: r.comment, createdAt: r.created_at,
     }));

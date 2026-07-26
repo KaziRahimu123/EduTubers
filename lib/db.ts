@@ -251,8 +251,8 @@ export async function dbDeleteImages(courseId: string): Promise<void> {
 
 // ── Reviews ───────────────────────────────────────────────────────────────────
 
-export async function dbGetReviews(courseId: string): Promise<FlashcardReview[]> {
-  const data = await dbProxy<FlashcardReview[]>('get_reviews', { courseId });
+export async function dbGetReviews(courseId: string, slug?: string): Promise<FlashcardReview[]> {
+  const data = await dbProxy<FlashcardReview[]>('get_reviews', { courseId, slug });
   return data ?? [];
 }
 

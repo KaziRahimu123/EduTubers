@@ -53,7 +53,7 @@ export default function ContentTypeDetail() {
       // Load feedback for every item (all content types)
       const fbMap: Record<string, FlashcardReview[]> = {};
       await Promise.all(filtered.map(async c => {
-        const reviews = await dbGetReviews(c.id);
+        const reviews = await dbGetReviews(c.id, c.slug);
         fbMap[c.id] = reviews;
       }));
       setFeedbackMap(fbMap);
@@ -433,31 +433,39 @@ export default function ContentTypeDetail() {
                 {/* ── Feedback row (all content types) ─────────────── */}
                 {(() => {
                   const fb = feedbackMap[item.id] ?? [];
-                  if (!fb.length) return null;
                   const expanded = expandedFeedback[item.id] ?? false;
                   return (
                     <div className="mt-3 pt-3 border-t border-gray-100">
                       <button
                         onClick={() => setExpandedFeedback(prev => ({ ...prev, [item.id]: !expanded }))}
-                        className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-800"
+                        className="flex items-center gap-1.5 text-xs font-medium text-gray-600 hover:text-blue-600 transition-colors"
                       >
-                        <MessageSquare size={12} className="text-blue-500" />
-                        {fb.length} feedback response{fb.length !== 1 ? 's' : ''}
+                        <MessageSquare size={13} className="text-blue-500" />
+                        <span>{fb.length} Review{fb.length !== 1 ? 's' : ''} / Feedback</span>
+                        {fb.length > 0 && (
+                          <span className="px-1.5 py-0.5 text-[10px] font-bold bg-blue-100 text-blue-700 rounded-full">
+                            {fb.length}
+                          </span>
+                        )}
                         {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                       </button>
                       {expanded && (
                         <div className="mt-2 space-y-2">
-                          {fb.map(r => (
-                            <div key={r.id} className="bg-gray-50 rounded-lg px-3 py-2 flex items-start gap-2">
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="text-xs font-semibold text-gray-700 truncate">{r.name}</span>
-                                  <span className="text-[10px] text-gray-400 flex-shrink-0">{new Date(r.createdAt).toLocaleDateString()}</span>
+                          {fb.length === 0 ? (
+                            <p className="text-xs text-gray-400 italic py-1">No student reviews received yet for this item.</p>
+                          ) : (
+                            fb.map(r => (
+                              <div key={r.id} className="bg-gray-50 rounded-lg px-3 py-2 flex items-start gap-2 border border-gray-100">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-xs font-semibold text-gray-800 truncate">{r.name}</span>
+                                    <span className="text-[10px] text-gray-400 flex-shrink-0">{new Date(r.createdAt).toLocaleDateString()}</span>
+                                  </div>
+                                  <p className="text-xs text-gray-600 mt-0.5 leading-snug">{r.comment}</p>
                                 </div>
-                                <p className="text-xs text-gray-600 mt-0.5">{r.comment}</p>
                               </div>
-                            </div>
-                          ))}
+                            ))
+                          )}
                         </div>
                       )}
                     </div>
