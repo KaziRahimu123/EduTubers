@@ -62,6 +62,19 @@ export default function ContentTypeDetail() {
       filtered.forEach(c => { counts[c.id] = fbMap[c.id]?.length ?? 0; });
       setReviewCounts(counts);
 
+      // Load attempt counts + full attempts for quizzes
+      if (typeId === 'quiz') {
+        const counts: Record<string, number> = {};
+        const qMap: Record<string, QuizAttemptResult[]> = {};
+        await Promise.all(filtered.map(async c => {
+          const attempts = await dbGetQuizAttempts(c.id);
+          counts[c.id] = attempts.length;
+          qMap[c.id] = attempts;
+        }));
+        setAttemptCounts(counts);
+        setQuizAttemptsMap(qMap);
+      }
+
       // Load task attempts for Interactive Challenges
       if (typeId === 'activities') {
         const tMap: Record<string, TaskAttemptResult[]> = {};
