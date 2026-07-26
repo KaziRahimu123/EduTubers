@@ -79,7 +79,7 @@ export default function AuthPage() {
           <div className="space-y-3">
             {/* Google */}
             <a
-              href="/api/auth/login?connection=google-oauth2"
+              href="/auth/login?connection=google-oauth2"
               className="flex items-center justify-center gap-3 w-full px-4 py-3 bg-white border border-gray-200 dark:border-slate-600 dark:bg-slate-800 text-gray-700 dark:text-white text-sm font-medium rounded-xl hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors shadow-sm"
             >
               <svg width="18" height="18" viewBox="0 0 18 18">
@@ -93,7 +93,7 @@ export default function AuthPage() {
 
             {/* GitHub */}
             <a
-              href="/api/auth/login?connection=github"
+              href="/auth/login?connection=github"
               className="flex items-center justify-center gap-3 w-full px-4 py-3 bg-gray-900 dark:bg-slate-700 text-white text-sm font-medium rounded-xl hover:bg-gray-800 dark:hover:bg-slate-600 transition-colors shadow-sm"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="white">

@@ -25,7 +25,7 @@ export default function Nav() {
   function handleSignOut() {
     setMenuOpen(false);
     // Auth0 logout — clears cookie and redirects home
-    window.location.href = '/api/auth/logout';
+    window.location.href = '/auth/logout';
   }
 
   const initials = username ? username.slice(0, 2).toUpperCase() : '';
