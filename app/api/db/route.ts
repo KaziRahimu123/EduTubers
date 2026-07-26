@@ -22,9 +22,10 @@ function ok(data: unknown) { return NextResponse.json({ data }); }
 function err(msg: string, status = 400) { return NextResponse.json({ error: msg }, { status }); }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function supabaseRestGetCourses(sbUrl: string, serviceKey: string): Promise<any[]> {
+function supabaseRestGetCourses(sbUrl: string, serviceKey: string, ownerId?: string): Promise<any[]> {
   return new Promise((resolve) => {
-    const parsed = new URL(`${sbUrl}/rest/v1/courses?select=*&order=updated_at.desc`);
+    const ownerFilter = ownerId ? `&owner_id=eq.${encodeURIComponent(ownerId)}` : '';
+    const parsed = new URL(`${sbUrl}/rest/v1/courses?select=*${ownerFilter}&order=updated_at.desc`);
     const req = nodeHttpsRequest(
       {
         hostname: parsed.hostname,
@@ -58,65 +59,116 @@ function supabaseRestGetCourses(sbUrl: string, serviceKey: string): Promise<any[
 
 function supabaseRestInsert(sbUrl: string, serviceKey: string, table: string, row: Record<string, unknown>): Promise<{ error: string | null }> {
   return new Promise((resolve) => {
-    const bodyStr = JSON.stringify(row);
     const parsed = new URL(`${sbUrl}/rest/v1/${table}`);
+    const body = JSON.stringify(row);
     const req = nodeHttpsRequest(
       {
         hostname: parsed.hostname,
-        path: parsed.pathname,
+        path: `${parsed.pathname}`,
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(bodyStr),
           apikey: serviceKey,
           Authorization: `Bearer ${serviceKey}`,
+          'Content-Type': 'application/json',
           Prefer: 'return=minimal',
         },
       },
       (res) => {
-        const status = res.statusCode ?? 0;
-        if (status >= 200 && status < 300) {
-          resolve({ error: null });
-        } else {
-          const chunks: Buffer[] = [];
-          res.on('data', (c: Buffer) => chunks.push(c));
-          res.on('end', () => resolve({ error: `HTTP ${status}: ${Buffer.concat(chunks).toString('utf8')}` }));
-        }
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => {
+          const status = res.statusCode ?? 0;
+          if (status >= 200 && status < 300) {
+            resolve({ error: null });
+          } else {
+            const text = Buffer.concat(chunks).toString('utf8');
+            resolve({ error: text });
+          }
+        });
+        res.on('error', (e) => resolve({ error: e.message }));
       },
     );
     req.on('error', (e) => resolve({ error: e.message }));
-    req.end(bodyStr);
+    req.write(body);
+    req.end();
   });
 }
 
 export async function POST(req: NextRequest) {
-  let body: { op: string; payload: Record<string, unknown> };
+  let body: { op?: string; payload?: Record<string, unknown> };
   try {
-    body = await req.json() as { op: string; payload: Record<string, unknown> };
+    body = await req.json();
   } catch {
-    return err('Invalid or missing JSON body', 400);
-  }
-  const { op, payload } = body;
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let sb: any;
-  try {
-    sb = adminClient();
-  } catch (e) {
-    console.warn('[api/db] adminClient fallback:', e);
-    sb = supabase;
+    return err('Invalid JSON body', 400);
   }
 
-  // ── PUBLIC OPS — no session required ─────────────────────────────────────
-  // These only write to tables that already have open RLS insert policies
-  // (quiz_reviews, quiz_attempts, task_attempts) for published courses.
+  const { op, payload = {} } = body;
+  if (!op) return err('Missing op', 400);
+
+  const sb = adminClient ?? supabase;
+
+  // ── PUBLIC / VISITOR READS & WRITES (no session required) ──────────────────
+
+  // ── get_public_course (by slug or id) ──────────────────────────────────────
+  if (op === 'get_public_course') {
+    const { identifier } = payload as { identifier: string };
+    const { data: bySlug } = await sb.from('courses').select('*').eq('slug', identifier).single();
+    if (bySlug) return ok(bySlug);
+    const { data: byId } = await sb.from('courses').select('*').eq('id', identifier).single();
+    return ok(byId ?? null);
+  }
+
+  // ── get_reviews ───────────────────────────────────────────────────────────
+  if (op === 'get_reviews') {
+    const { courseId } = payload as { courseId: string };
+    const { data, error } = await sb
+      .from('flashcard_reviews')
+      .select('id, course_id, name, comment, created_at')
+      .eq('course_id', courseId)
+      .order('created_at', { ascending: false });
+    if (error) { console.error('get_reviews', error); return ok([]); }
+    const mapped = (data ?? []).map((r: { id: string; course_id: string; name: string; comment: string; created_at: string }) => ({
+      id: r.id, deckId: r.course_id, name: r.name, comment: r.comment, createdAt: r.created_at,
+    }));
+    return ok(mapped);
+  }
+
+  // ── get_quiz_attempts ─────────────────────────────────────────────────────
+  if (op === 'get_quiz_attempts') {
+    const { quizId } = payload as { quizId: string };
+    const { data, error } = await sb
+      .from('quiz_attempts')
+      .select('id, quiz_id, answers, score, total, percentage_score, passed, attempt_number, completed_at')
+      .eq('quiz_id', quizId)
+      .order('completed_at', { ascending: false });
+    if (error) { console.error('get_quiz_attempts', error); return ok([]); }
+    const mapped = (data ?? []).map((r: { id: string; quiz_id: string; answers: unknown; score: number; total: number; percentage_score: number; passed: boolean; attempt_number: number; completed_at: string }) => ({
+      id: r.id, quizId: r.quiz_id, answers: r.answers, score: r.score, total: r.total, percentageScore: r.percentage_score, passed: r.passed, attemptNumber: r.attempt_number, completedAt: r.completed_at,
+    }));
+    return ok(mapped);
+  }
+
+  // ── get_task_attempts ─────────────────────────────────────────────────────
+  if (op === 'get_task_attempts') {
+    const { courseId } = payload as { courseId: string };
+    const { data, error } = await sb
+      .from('task_attempts')
+      .select('id, course_id, taker_name, results, correct_count, total_count, percentage_score, completed_at')
+      .eq('course_id', courseId)
+      .order('completed_at', { ascending: false });
+    if (error) { console.error('get_task_attempts', error); return ok([]); }
+    const mapped = (data ?? []).map((r: { id: string; course_id: string; taker_name: string | null; results: unknown; correct_count: number; total_count: number; percentage_score: number; completed_at: string }) => ({
+      id: r.id, courseId: r.course_id, takerName: r.taker_name, results: r.results, correctCount: r.correct_count, totalCount: r.total_count, percentageScore: r.percentage_score, completedAt: r.completed_at,
+    }));
+    return ok(mapped);
+  }
 
   // ── add_review ────────────────────────────────────────────────────────────
   if (op === 'add_review') {
-    const { courseId, name, comment, rating } = payload as { courseId: string; name: string; comment: string; rating?: number };
+    const { deckId, name, comment } = payload as { deckId: string; name: string; comment: string };
     const { data, error } = await sb
-      .from('quiz_reviews')
-      .insert({ course_id: courseId, name, comment, rating: rating ?? null })
+      .from('flashcard_reviews')
+      .insert({ course_id: deckId, name, comment })
       .select()
       .single();
     if (error || !data) { console.error('add_review', error); return err(error?.message ?? 'failed'); }
@@ -197,17 +249,17 @@ export async function POST(req: NextRequest) {
     return ok(null);
   }
 
-  // ── get_courses ───────────────────────────────────────────────────────────
-  if (op === 'get_courses') {
-    const sbUrl      = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
-    const rows = await supabaseRestGetCourses(sbUrl, serviceKey);
-    return ok(rows);
-  }
-
   // ── CREATOR OPS — session required ────────────────────────────────────────
   const user = await getAuth0User();
   if (!user) return err('Not authenticated', 401);
+
+  // ── get_courses (filtered by owner_id) ───────────────────────────────────
+  if (op === 'get_courses') {
+    const sbUrl      = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
+    const rows = await supabaseRestGetCourses(sbUrl, serviceKey, user.id);
+    return ok(rows);
+  }
 
   // ── get_course ────────────────────────────────────────────────────────────
   if (op === 'get_course') {
