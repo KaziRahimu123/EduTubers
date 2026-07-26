@@ -110,7 +110,7 @@ function granitePost(
   prompt: string,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    const modelId = process.env.WATSONX_MODEL_ID || 'ibm/granite-3-20b-instruct';
+    const modelId = process.env.WATSONX_MODEL_ID || 'ibm/granite-3-8b-instruct';
     const bodyObj = {
       model_id:   modelId,
       project_id: projectId,
