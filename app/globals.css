@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* ── Disable dark mode variant entirely across Tailwind v4 ────────────────── */
+@variant dark (:not(*));
+
 /* ── Print: suppress browser header/footer (URL + timestamp) ──────────────── */
 @media print {
   @page {
@@ -20,14 +23,24 @@
 }
 
 html,
-body {
+body,
+:root {
   background-color: #ffffff !important;
   color: #111827 !important;
+  color-scheme: light !important;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
-/* Enforce light background everywhere */
+/* Force light mode regardless of media query */
+@media (prefers-color-scheme: dark) {
+  :root, html, body {
+    background-color: #ffffff !important;
+    color: #111827 !important;
+    color-scheme: light !important;
+  }
+}
+
 html.dark,
 html.dark body {
   background-color: #ffffff !important;

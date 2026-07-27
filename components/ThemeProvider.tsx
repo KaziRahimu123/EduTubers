@@ -31,6 +31,17 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     enforceLightMode();
     localStorage.removeItem('be_theme');
+    localStorage.setItem('theme', 'light');
+
+    // Continuously strip .dark class if added dynamically by third-party extensions
+    const observer = new MutationObserver(() => {
+      if (document.documentElement.classList.contains('dark')) {
+        document.documentElement.classList.remove('dark');
+      }
+    });
+
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
   }, []);
 
   return (
