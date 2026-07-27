@@ -23,12 +23,10 @@ const MAX_TOTAL_MB    = 100;
 const MAX_TOTAL_BYTES = MAX_TOTAL_MB * 1024 * 1024;
 
 const ALLOWED_AUDIO_TYPES = new Set([
-  'audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/webm',
-  'audio/ogg', 'audio/flac', 'audio/x-flac',
+  'audio/mpeg', 'audio/mp3',
 ]);
 const ALLOWED_VIDEO_TYPES = new Set([
-  'video/mp4', 'video/quicktime', 'video/webm',
-  'video/mpeg', 'video/x-msvideo',
+  'video/mp4', 'video/quicktime',
 ]);
 
 const DEFAULT_TASK_CONFIG: PracticeTaskConfig = {
@@ -212,14 +210,14 @@ export default function Generator() {
     // Validate each new file's type
     for (const f of newFiles) {
       const ext = f.name.toLowerCase().split('.').pop() ?? '';
-      const isKnownMediaExt = ['mov', 'mp4', 'webm', 'mp3', 'wav', 'flac', 'ogg', 'pdf'].includes(ext);
+      const isAllowedExt = ['pdf', 'mp3', 'mov', 'mp4'].includes(ext);
       const allowed =
         f.type === 'application/pdf' ||
         ALLOWED_AUDIO_TYPES.has(f.type) ||
         ALLOWED_VIDEO_TYPES.has(f.type) ||
-        isKnownMediaExt;
+        isAllowedExt;
       if (!allowed) {
-        setFileError(`"${f.name}" is not a supported format. Accepted: PDF, MP4, MOV, WebM, MP3, WAV, FLAC.`);
+        setFileError(`"${f.name}" is not a supported format. Accepted formats: PDF, MP3, MOV, MP4.`);
         return;
       }
     }
@@ -750,14 +748,14 @@ export default function Generator() {
                       : `Add another file (${uploadedFiles.length}/${MAX_FILES})`}
                   </p>
                   <p className="text-xs text-gray-400 dark:text-slate-500 mt-0.5">
-                    PDF, MP4, MOV, WebM, MP3, WAV, FLAC · Up to {MAX_FILES} files · {MAX_TOTAL_MB} MB combined
+                    PDF, MP3, MOV, MP4 · Up to {MAX_FILES} files · {MAX_TOTAL_MB} MB combined
                   </p>
                 </div>
                 <input
                   ref={dropRef}
                   type="file"
                   multiple
-                  accept=".pdf,application/pdf,video/mp4,video/quicktime,video/webm,video/mpeg,audio/mpeg,.mp3,audio/wav,.wav,audio/flac,.flac,audio/webm,audio/ogg"
+                  accept=".pdf,application/pdf,.mp3,audio/mpeg,video/mp4,.mp4,video/quicktime,.mov"
                   className="hidden"
                   onChange={(e: ChangeEvent<HTMLInputElement>) => {
                     const files = Array.from(e.target.files ?? []);
