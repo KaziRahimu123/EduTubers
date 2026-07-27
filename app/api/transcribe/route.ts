@@ -2,11 +2,12 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { unlink, readFile, readdir, rm, access, mkdir, stat, writeFile, open } from 'node:fs/promises';
+import { unlink, readFile, readdir, rm, access, mkdir, stat, writeFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import ffmpegStatic from 'ffmpeg-static';
+import { adminClient } from '@/lib/supabase';
 
 const execFileAsync = promisify(execFile);
 
@@ -167,36 +168,49 @@ export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
 
-    // ── Chunked upload path: chunk + uploadId + chunkIndex + totalChunks ─────
-    const chunkEntry  = formData.get('chunk');
+    // ── Chunked reassembly from Supabase Storage (uploadId + totalChunks) ────
     const uploadId    = formData.get('uploadId') as string | null;
-    const chunkIndex  = parseInt((formData.get('chunkIndex') as string) || '0', 10);
-    const totalChunks = parseInt((formData.get('totalChunks') as string) || '1', 10);
-    const filename    = (formData.get('filename') as string) || 'upload.mov';
+    const totalChunks = parseInt((formData.get('totalChunks') as string) || '0', 10);
+    const filename    = (formData.get('filename') as string) || 'video.mov';
 
-    if (chunkEntry && chunkEntry instanceof File && uploadId) {
+    if (uploadId && totalChunks > 0) {
       const sanitizedId = uploadId.replace(/[^a-zA-Z0-9_-]/g, '');
-      const inputPath   = join(tmpdir(), `transcribe_chunked_${sanitizedId}`);
-      const bytes       = new Uint8Array(await chunkEntry.arrayBuffer());
+      const inputPath   = join(tmpdir(), `transcribe_in_${sanitizedId}`);
+      const segDir      = join(tmpdir(), `transcribe_segs_${sanitizedId}`);
+      const sb          = adminClient();
 
-      const handle = await open(inputPath, chunkIndex === 0 ? 'w' : 'a');
-      await handle.write(bytes);
-      await handle.close();
+      const chunkBuffers: Buffer[] = [];
+      const removePaths: string[] = [];
 
-      if (chunkIndex < totalChunks - 1) {
-        return NextResponse.json({ status: 'chunk_received', chunkIndex, totalChunks });
-      }
-
-      // Last chunk received — transcribe assembled file
-      const segDir = join(tmpdir(), `transcribe_segs_${sanitizedId}`);
       try {
+        console.log(`[transcribe] Fetching ${totalChunks} storage chunk(s) for ${sanitizedId}…`);
+        for (let i = 0; i < totalChunks; i++) {
+          const storagePath = `transcribe_chunks/${sanitizedId}/${i}`;
+          removePaths.push(storagePath);
+
+          const { data, error } = await sb.storage.from('images').download(storagePath);
+          if (error || !data) {
+            throw new Error(`Failed to download chunk ${i}/${totalChunks}: ${error?.message || 'Empty chunk'}`);
+          }
+          const buf = Buffer.from(await data.arrayBuffer());
+          chunkBuffers.push(buf);
+        }
+
+        const fullBuffer = Buffer.concat(chunkBuffers);
+        console.log(`[transcribe] Reassembled ${filename}: ${(fullBuffer.byteLength / 1024 / 1024).toFixed(1)} MB`);
+
+        await writeFile(inputPath, fullBuffer);
         await mkdir(segDir, { recursive: true });
+
         const mockFile = new File([], filename, { type: 'video/quicktime' });
         const transcript = await transcribeSingleFile(apiKey, mockFile, inputPath, segDir);
         return NextResponse.json({ transcript });
       } finally {
         await unlink(inputPath).catch(() => {});
         await rm(segDir, { recursive: true, force: true }).catch(() => {});
+        if (removePaths.length > 0) {
+          await sb.storage.from('images').remove(removePaths).catch(() => {});
+        }
       }
     }
 

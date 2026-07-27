@@ -365,8 +365,68 @@ export default function Generator() {
     return new Blob([out], { type: 'audio/wav' });
   }
 
+  async function extractAudioInBrowser(file: File): Promise<Blob | null> {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextClass) return null;
+      
+      const audioCtx = new AudioContextClass({ sampleRate: 16000 });
+      const decoded = await audioCtx.decodeAudioData(arrayBuffer);
+      
+      const channelData = decoded.getChannelData(0);
+      const dataLength = channelData.length * 2;
+      const headerLength = 44;
+      const totalLength = headerLength + dataLength;
+      
+      const out = new DataView(new ArrayBuffer(totalLength));
+      const writeString = (offset: number, str: string) => {
+        for (let i = 0; i < str.length; i++) out.setUint8(offset + i, str.charCodeAt(i));
+      };
+      
+      writeString(0, 'RIFF');
+      out.setUint32(4, totalLength - 8, true);
+      writeString(8, 'WAVE');
+      writeString(12, 'fmt ');
+      out.setUint32(16, 16, true);
+      out.setUint16(20, 1, true); // mono
+      out.setUint16(22, 1, true); // 1 channel
+      out.setUint32(24, 16000, true);
+      out.setUint32(28, 32000, true);
+      out.setUint16(32, 2, true);
+      out.setUint16(34, 16, true);
+      writeString(36, 'data');
+      out.setUint32(40, dataLength, true);
+      
+      let offset = 44;
+      for (let i = 0; i < channelData.length; i++) {
+        const s = Math.max(-1, Math.min(1, channelData[i]));
+        out.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+        offset += 2;
+      }
+      
+      return new Blob([out.buffer], { type: 'audio/wav' });
+    } catch {
+      return null;
+    }
+  }
+
   async function transcribeMedia(file: File): Promise<string> {
-    const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MB per chunk — well under Vercel's 4.5 MB limit
+    // 1. Try client-side audio extraction first (converts 30 MB video -> 1.5 MB WAV in browser!)
+    if (file.type.startsWith('video/') || file.size > 2.5 * 1024 * 1024) {
+      const extractedBlob = await extractAudioInBrowser(file);
+      if (extractedBlob && extractedBlob.size <= 4 * 1024 * 1024) {
+        const formData = new FormData();
+        formData.append('file', extractedBlob, file.name.replace(/\.[^/.]+$/, '') + '.wav');
+        const res = await fetch('/api/transcribe', { method: 'POST', body: formData });
+        const text = await res.text();
+        let data: { transcript?: string; error?: string } = {};
+        try { data = JSON.parse(text); } catch { /* noop */ }
+        if (res.ok && data.transcript) return data.transcript;
+      }
+    }
+
+    const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MB per chunk
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
     if (file.size <= 2.5 * 1024 * 1024) {
@@ -381,7 +441,7 @@ export default function Generator() {
       return data.transcript ?? '';
     }
 
-    // Large video/audio file (e.g. 5.3 MB MOV, 34 MB MOV, 100 MB MP4) — Chunked upload
+    // Large video/audio file fallback — Chunked storage upload (chunks are immediately deleted after transcription)
     const uploadId = 'up_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
 
     for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
@@ -394,23 +454,33 @@ export default function Generator() {
       formData.append('uploadId', uploadId);
       formData.append('chunkIndex', String(chunkIndex));
       formData.append('totalChunks', String(totalChunks));
-      formData.append('filename', file.name);
 
-      const res = await fetch('/api/transcribe', { method: 'POST', body: formData });
+      const res = await fetch('/api/upload-chunk', { method: 'POST', body: formData });
       const text = await res.text();
-      let data: { transcript?: string; error?: string; status?: string } = {};
+      let data: { error?: string } = {};
       try { data = JSON.parse(text); } catch { /* noop */ }
 
       if (!res.ok || data.error) {
         throw new Error(data.error ?? `Chunk ${chunkIndex + 1}/${totalChunks} upload failed (${res.status}).`);
       }
-
-      if (chunkIndex === totalChunks - 1) {
-        return data.transcript ?? '';
-      }
     }
 
-    throw new Error('Transcription completed without returning text.');
+    // Trigger reassembly and Whisper transcription
+    const finalForm = new FormData();
+    finalForm.append('uploadId', uploadId);
+    finalForm.append('totalChunks', String(totalChunks));
+    finalForm.append('filename', file.name);
+
+    const res = await fetch('/api/transcribe', { method: 'POST', body: finalForm });
+    const text = await res.text();
+    let data: { transcript?: string; error?: string } = {};
+    try { data = JSON.parse(text); } catch { /* noop */ }
+
+    if (!res.ok || data.error) {
+      throw new Error(data.error ?? `Transcription failed (${res.status}).`);
+    }
+
+    return data.transcript ?? '';
   }
 
   function removeFile(index: number) {
