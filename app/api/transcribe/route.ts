@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { unlink, readFile, readdir, rm, access, mkdir, stat, writeFile } from 'node:fs/promises';
+import { unlink, readFile, readdir, rm, access, mkdir, stat, writeFile, open } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -18,19 +18,7 @@ const MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024;
 // 20-minute segments — at 64 kbps mono that's ~9.6 MB, well under the 25 MB Whisper limit
 const SEGMENT_DURATION_SECS = 1200;
 
-const ALLOWED_MIME_TYPES = new Set([
-  'audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/webm', 'audio/ogg', 'audio/flac', 'audio/x-flac',
-  'video/mp4', 'video/quicktime', 'video/webm', 'video/mpeg', 'video/x-msvideo',
-]);
-
-// Long enough for multiple Whisper calls on a 100 MB file
 export const maxDuration = 60;
-
-// ── Parse multipart upload via Web FormData API ───────────────────────────────
-// Next.js App Router (v15+) fully supports req.formData() for route handlers
-// and streams the body without double-buffering when proxyClientMaxBodySize is
-// set in next.config.ts. This avoids the locked-stream problem that occurs when
-// manually piping req.body through Busboy after Next has already read it.
 
 interface SavedFile {
   path: string;
@@ -40,21 +28,27 @@ interface SavedFile {
 }
 
 async function saveFileToDisk(file: File, destPath: string): Promise<SavedFile> {
-  if (file.size > MAX_FILE_BYTES) {
-    throw new Error(`"${file.name}" must be ${MAX_FILE_MB} MB or smaller.`);
+  const fileStat = await stat(destPath).catch(() => null);
+  const size = fileStat ? fileStat.size : file.size;
+
+  if (size > MAX_FILE_BYTES) {
+    throw new Error(`"${file.name || 'File'}" must be ${MAX_FILE_MB} MB or smaller.`);
   }
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  await writeFile(destPath, bytes);
+
+  if (!fileStat && file.size > 0) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    await writeFile(destPath, bytes);
+  }
+
   return {
     path:     destPath,
     mimeType: file.type || 'application/octet-stream',
     filename: file.name || 'upload',
-    size:     file.size,
+    size,
   };
 }
 
 // ── Resolve a working ffmpeg binary ──────────────────────────────────────────
-// execFile avoids shell quoting — paths with spaces (e.g. "EduTubers/…") work fine.
 
 async function resolveFfmpegBin(): Promise<string> {
   if (ffmpegStatic) {
@@ -66,7 +60,7 @@ async function resolveFfmpegBin(): Promise<string> {
     const bin = stdout.trim();
     if (bin) { await access(bin); return bin; }
   } catch { /* not on PATH */ }
-  throw new Error('ffmpeg not found. Run `brew install ffmpeg`.');
+  throw new Error('ffmpeg not found.');
 }
 
 // ── Split to MP3 segments via ffmpeg ─────────────────────────────────────────
@@ -94,11 +88,6 @@ async function splitToMp3Segments(inputPath: string, outputDir: string): Promise
 }
 
 // ── Send one MP3 segment to Whisper via native fetch ─────────────────────────
-// Using native fetch + FormData avoids the hand-rolled multipart framing that
-// triggered SSL alert 20 (bad_record_mac) with node:https.  The browser-side
-// AbortSignal concern does not apply here — this runs server-side in a Route
-// Handler where Next.js does not propagate the incoming request signal to
-// outgoing fetch() calls made inside the same handler invocation.
 
 async function transcribeChunkWithFetch(apiKey: string, mp3Bytes: Buffer): Promise<string> {
   const form = new FormData();
@@ -136,33 +125,20 @@ async function transcribeSingleFile(
   segDir: string,
 ): Promise<string> {
   const saved = await saveFileToDisk(file, inputPath);
-  const { mimeType, filename, size } = saved;
+  const { filename, size } = saved;
 
-  console.log('[transcribe] Saved:', filename, '| type:', mimeType, '| size:', Math.round(size / 1024), 'KB');
-
+  console.log('[transcribe] Saved:', filename, '| size:', Math.round(size / 1024), 'KB');
   if (size === 0) throw new Error('The selected file is empty.');
-  if (!ALLOWED_MIME_TYPES.has(mimeType)) {
-    throw new Error('Unsupported format. Accepted: MP4, MOV, WebM, MP3, WAV, OGG, FLAC.');
-  }
 
-  const isSmallAudio = mimeType.startsWith('audio/') && size <= WHISPER_CHUNK_BYTES;
-  let segments: string[];
-
-  if (isSmallAudio) {
-    segments = [inputPath];
-    console.log('[transcribe] Small audio — sending directly');
-  } else {
-    console.log('[transcribe] Running ffmpeg to extract + segment audio…');
-    segments = await splitToMp3Segments(inputPath, segDir);
-    console.log('[transcribe]', segments.length, 'segment(s) produced');
-  }
+  console.log('[transcribe] Running ffmpeg to extract + segment audio…');
+  const segments = await splitToMp3Segments(inputPath, segDir);
+  console.log('[transcribe]', segments.length, 'segment(s) produced');
 
   for (const seg of segments) {
     const { size: segSize } = await stat(seg);
     if (segSize > WHISPER_CHUNK_BYTES) {
       throw new Error(
-        `A segment is ${Math.round(segSize / 1024 / 1024)} MB — exceeds the 25 MB Whisper limit. ` +
-        'Try a shorter video or lower-bitrate source.',
+        `A segment is ${Math.round(segSize / 1024 / 1024)} MB — exceeds the 25 MB Whisper limit.`,
       );
     }
   }
@@ -191,31 +167,37 @@ export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
 
-    // ── Multi-file path: `files[]` field ─────────────────────────────────────
-    const multiEntries = formData.getAll('files[]') as (File | null)[];
-    const multiFiles   = multiEntries.filter((f): f is File => f instanceof File);
+    // ── Chunked upload path: chunk + uploadId + chunkIndex + totalChunks ─────
+    const chunkEntry  = formData.get('chunk');
+    const uploadId    = formData.get('uploadId') as string | null;
+    const chunkIndex  = parseInt((formData.get('chunkIndex') as string) || '0', 10);
+    const totalChunks = parseInt((formData.get('totalChunks') as string) || '1', 10);
+    const filename    = (formData.get('filename') as string) || 'upload.mov';
 
-    if (multiFiles.length > 0) {
-      // Process each file sequentially to avoid swamping ffmpeg/Whisper
-      const results: { filename: string; transcript: string }[] = [];
+    if (chunkEntry && chunkEntry instanceof File && uploadId) {
+      const sanitizedId = uploadId.replace(/[^a-zA-Z0-9_-]/g, '');
+      const inputPath   = join(tmpdir(), `transcribe_chunked_${sanitizedId}`);
+      const bytes       = new Uint8Array(await chunkEntry.arrayBuffer());
 
-      for (let i = 0; i < multiFiles.length; i++) {
-        const file      = multiFiles[i];
-        const inputPath = join(tmpdir(), `transcribe_in_${id}_${i}`);
-        const segDir    = join(tmpdir(), `transcribe_segs_${id}_${i}`);
+      const handle = await open(inputPath, chunkIndex === 0 ? 'w' : 'a');
+      await handle.write(bytes);
+      await handle.close();
 
-        try {
-          await mkdir(segDir, { recursive: true });
-          console.log(`[transcribe] Multi-file ${i + 1}/${multiFiles.length}: ${file.name}`);
-          const transcript = await transcribeSingleFile(apiKey, file, inputPath, segDir);
-          results.push({ filename: file.name, transcript });
-        } finally {
-          await unlink(inputPath).catch(() => {});
-          await rm(segDir, { recursive: true, force: true }).catch(() => {});
-        }
+      if (chunkIndex < totalChunks - 1) {
+        return NextResponse.json({ status: 'chunk_received', chunkIndex, totalChunks });
       }
 
-      return NextResponse.json({ results });
+      // Last chunk received — transcribe assembled file
+      const segDir = join(tmpdir(), `transcribe_segs_${sanitizedId}`);
+      try {
+        await mkdir(segDir, { recursive: true });
+        const mockFile = new File([], filename, { type: 'video/quicktime' });
+        const transcript = await transcribeSingleFile(apiKey, mockFile, inputPath, segDir);
+        return NextResponse.json({ transcript });
+      } finally {
+        await unlink(inputPath).catch(() => {});
+        await rm(segDir, { recursive: true, force: true }).catch(() => {});
+      }
     }
 
     // ── Single-file path: legacy `file` / `video` field ──────────────────────
@@ -236,8 +218,7 @@ export async function POST(req: NextRequest) {
 
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      const cause   = err instanceof Error && (err as NodeJS.ErrnoException).cause;
-      console.error('[transcribe] Error:', message, cause ? `| cause: ${cause}` : '');
+      console.error('[transcribe] Error:', message);
       return NextResponse.json({ error: `Transcription failed: ${message}` }, { status: 500 });
     } finally {
       await unlink(inputPath).catch(() => {});

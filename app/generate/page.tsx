@@ -366,37 +366,51 @@ export default function Generator() {
   }
 
   async function transcribeMedia(file: File): Promise<string> {
-    let payloadFile: File | Blob = file;
-    const ext = file.name.toLowerCase().split('.').pop() ?? '';
-    if (file.size > 3 * 1024 * 1024 || file.type.startsWith('video/') || ['mov', 'mp4', 'webm'].includes(ext)) {
-      try {
-        payloadFile = await extractAudioBlobFromMedia(file);
-      } catch {
-        payloadFile = file;
+    const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MB per chunk — well under Vercel's 4.5 MB limit
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+
+    if (file.size <= 2.5 * 1024 * 1024) {
+      // Small file — send directly
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('/api/transcribe', { method: 'POST', body: formData });
+      const text = await res.text();
+      let data: { transcript?: string; error?: string } = {};
+      try { data = JSON.parse(text); } catch { /* noop */ }
+      if (!res.ok || data.error) throw new Error(data.error ?? `Upload failed (${res.status}).`);
+      return data.transcript ?? '';
+    }
+
+    // Large video/audio file (e.g. 5.3 MB MOV, 34 MB MOV, 100 MB MP4) — Chunked upload
+    const uploadId = 'up_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+      const start = chunkIndex * CHUNK_SIZE;
+      const end   = Math.min(file.size, start + CHUNK_SIZE);
+      const chunkBlob = file.slice(start, end);
+
+      const formData = new FormData();
+      formData.append('chunk', chunkBlob, file.name);
+      formData.append('uploadId', uploadId);
+      formData.append('chunkIndex', String(chunkIndex));
+      formData.append('totalChunks', String(totalChunks));
+      formData.append('filename', file.name);
+
+      const res = await fetch('/api/transcribe', { method: 'POST', body: formData });
+      const text = await res.text();
+      let data: { transcript?: string; error?: string; status?: string } = {};
+      try { data = JSON.parse(text); } catch { /* noop */ }
+
+      if (!res.ok || data.error) {
+        throw new Error(data.error ?? `Chunk ${chunkIndex + 1}/${totalChunks} upload failed (${res.status}).`);
+      }
+
+      if (chunkIndex === totalChunks - 1) {
+        return data.transcript ?? '';
       }
     }
 
-    const formData = new FormData();
-    const sendName = file.name.replace(/\.[^/.]+$/, "") + ".wav";
-    formData.append('file', payloadFile, sendName);
-
-    const res = await fetch('/api/transcribe', { method: 'POST', body: formData });
-    const text = await res.text();
-    let data: { transcript?: string; error?: string } = {};
-    try {
-      data = JSON.parse(text);
-    } catch {
-      if (!res.ok) {
-        throw new Error(
-          res.status === 413
-            ? 'File payload is too large for the server. Please use a shorter video clip.'
-            : `Server error (${res.status}): ${text.slice(0, 120)}`
-        );
-      }
-    }
-
-    if (!res.ok || data.error) throw new Error(data.error ?? 'Transcription failed.');
-    return data.transcript ?? '';
+    throw new Error('Transcription completed without returning text.');
   }
 
   function removeFile(index: number) {
