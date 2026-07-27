@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Printer, ImageOff, Pencil, RefreshCw, Upload, StopCircle, Lock, Globe, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Printer, ImageOff, Pencil, RefreshCw, Upload, StopCircle, Lock, Globe, CheckCircle, Trash2, Plus } from 'lucide-react';
 import RichNotesEditor, { mdToHtml, htmlToMd } from '@/components/RichNotesEditor';
 import { dbGetCourse, dbSaveCourse, dbUploadImage, dbIncrementViews, dbProxy } from '@/lib/db';
 import { useIsCreator } from '@/lib/useIsCreator';
@@ -412,6 +412,30 @@ export default function VisualGuidePage() {
     patchCourse({ modules });
   }
 
+  function deleteSection(index: number) {
+    if (!course) return;
+    if (course.modules.length <= 1) {
+      alert('An explainer must have at least 1 section.');
+      return;
+    }
+    if (!confirm(`Are you sure you want to delete Section ${index + 1}?`)) return;
+    const modules = course.modules.filter((_, i) => i !== index);
+    patchCourse({ modules });
+  }
+
+  function addSection() {
+    if (!course) return;
+    const newIndex = course.modules.length + 1;
+    const newModule: Module = {
+      id: 'mod_' + Math.random().toString(36).slice(2),
+      title: `Section ${newIndex}: New Concept`,
+      objective: 'Key learning objective for this section.',
+      lessonNotes: 'Detailed explanation and visual breakdown of this concept.',
+    };
+    const modules = [...course.modules, newModule];
+    patchCourse({ modules });
+  }
+
   async function togglePublish() {
     if (!course) return;
     const isPublishing = course.status !== 'published';
@@ -573,23 +597,36 @@ export default function VisualGuidePage() {
                       >
                         {/* Header bar */}
                         <div
-                          className="px-5 py-3 flex items-center gap-3"
+                          className="px-5 py-3 flex items-center justify-between gap-3"
                           style={{ backgroundColor: accent.pageBg, borderBottom: `2px solid ${accent.border}` }}
                         >
-                          <span
-                            className="text-xs font-black w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0"
-                            style={{ color: '#fff', backgroundColor: accent.label }}
-                          >
-                            {i + 1}
-                          </span>
-                          <h2 className="text-lg font-bold flex-1" style={{ color: accent.text }}>
-                            <EditableText
-                              value={mod.title}
-                              onChange={v => patchModuleTitle(i, v)}
-                              className="text-lg font-bold"
-                              placeholder="Section title…"
-                            />
-                          </h2>
+                          <div className="flex items-center gap-3 flex-1 min-w-0">
+                            <span
+                              className="text-xs font-black w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0"
+                              style={{ color: '#fff', backgroundColor: accent.label }}
+                            >
+                              {i + 1}
+                            </span>
+                            <h2 className="text-lg font-bold flex-1 truncate" style={{ color: accent.text }}>
+                              <EditableText
+                                value={mod.title}
+                                onChange={v => patchModuleTitle(i, v)}
+                                className="text-lg font-bold"
+                                placeholder="Section title…"
+                              />
+                            </h2>
+                          </div>
+
+                          {/* Delete section button — creator screen only */}
+                          {isCreator && (
+                            <button
+                              onClick={() => deleteSection(i)}
+                              className="print:hidden p-1.5 rounded-lg text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors flex-shrink-0"
+                              title="Delete this section"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          )}
                         </div>
 
                         {/* Two-column body (or single column if no image generated) */}
@@ -704,6 +741,17 @@ export default function VisualGuidePage() {
               );
             })}
           </div>
+
+          {isCreator && (
+            <div className="print:hidden mt-6 mb-2 flex justify-center">
+              <button
+                onClick={addSection}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 rounded-xl text-sm font-semibold transition-colors shadow-sm"
+              >
+                <Plus size={16} /> Add Section
+              </button>
+            </div>
+          )}
 
           {/* Feedback — screen only */}
           <div className="print:hidden max-w-[800px] mx-auto px-10 pb-10 pt-4">

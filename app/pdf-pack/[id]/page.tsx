@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Printer, ChevronDown, ChevronUp, BookOpen, Target, List, FileText, CheckSquare, Palette, Pencil, ImageOff, RefreshCw, Upload, Lock, Globe, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Printer, ChevronDown, ChevronUp, BookOpen, Target, List, FileText, CheckSquare, Palette, Pencil, ImageOff, RefreshCw, Upload, Lock, Globe, CheckCircle, Trash2, Plus } from 'lucide-react';
 import { dbGetCourse, dbSaveCourse, dbUploadImage, dbIncrementViews, dbProxy } from '@/lib/db';
 import { useIsCreator } from '@/lib/useIsCreator';
 import type { PdfPack, PdfSection, Course } from '@/lib/types';
@@ -293,16 +293,18 @@ function ColorPicker({ currentHex, onChange }: { currentHex: string; onChange: (
 
 // ── Section card ──────────────────────────────────────────────────────────────
 function SectionCard({
-  section, index, showAnswers, color, onColorChange, onSectionChange,
+  section, index, showAnswers, color, onColorChange, onSectionChange, onDeleteSection,
   imageUrl, onRegenerateImage, onUploadImage,
 }: {
   section: PdfSection; index: number; showAnswers: boolean;
   color: PaletteEntry; onColorChange: (hex: string) => void;
   onSectionChange: (s: PdfSection) => void;
+  onDeleteSection?: () => void;
   imageUrl: string | null | undefined;
   onRegenerateImage: () => void;
   onUploadImage: (file: File) => void;
 }) {
+  const isCreator = useIsCreator();
   const [open, setOpen] = useState(true);
 
   function patchSection(patch: Partial<PdfSection>) {
@@ -326,6 +328,15 @@ function SectionCard({
         </button>
         <div className="flex items-center gap-2">
           <ColorPicker currentHex={color.bg} onChange={onColorChange} />
+          {isCreator && onDeleteSection && (
+            <button
+              onClick={e => { e.stopPropagation(); onDeleteSection(); }}
+              className="p-1.5 rounded-lg text-white/70 hover:text-white hover:bg-white/20 transition-colors"
+              title="Delete section"
+            >
+              <Trash2 size={15} />
+            </button>
+          )}
           <button onClick={() => setOpen(o => !o)} style={{ color: color.text }} className="opacity-70 hover:opacity-100">
             {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
           </button>
@@ -743,6 +754,31 @@ export default function PdfPackPage() {
     dbSaveCourse(updatedCourse);
   }, [course]);
 
+  function deleteSection(i: number) {
+    if (!pack || !course) return;
+    if (pack.sections.length <= 1) {
+      alert('A content guide must have at least 1 section.');
+      return;
+    }
+    if (!confirm(`Are you sure you want to delete Section ${i + 1}?`)) return;
+    const sections = pack.sections.filter((_, idx) => idx !== i);
+    persistPack({ ...pack, sections });
+  }
+
+  function addSection() {
+    if (!pack || !course) return;
+    const newIdx = pack.sections.length + 1;
+    const newSec: PdfSection = {
+      title: `Section ${newIdx}: New Topic`,
+      overview: 'Summary of key concepts for this section.',
+      notes: 'Detailed notes and takeaways for this section.',
+      keyPoints: ['Key takeaway point 1', 'Key takeaway point 2'],
+      keyTerms: [{ term: 'Key Term', definition: 'Definition of the term.' }],
+    };
+    const sections = [...pack.sections, newSec];
+    persistPack({ ...pack, sections });
+  }
+
   function patchPackColors(colors: Record<number, string>, cover: string) {
     if (!pack || !course) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1009,12 +1045,24 @@ export default function PdfPackPage() {
                 color={paletteFromHex(hex)}
                 onColorChange={hex => updateSectionColor(i, hex)}
                 onSectionChange={s => updateSection(i, s)}
+                onDeleteSection={() => deleteSection(i)}
                 imageUrl={imageState[i]}
                 onRegenerateImage={() => regenerateImage(i)}
                 onUploadImage={file => uploadImage(i, file)}
               />
             );
           })}
+
+          {isCreator && (
+            <div className="print:hidden mb-6 flex justify-center">
+              <button
+                onClick={addSection}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 rounded-xl text-sm font-semibold transition-colors shadow-sm"
+              >
+                <Plus size={16} /> Add Section
+              </button>
+            </div>
+          )}
 
           {/* ── Final summary ─────────────────────────────────────────────── */}
           <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden print:rounded-none print:border-0 print:border-t-2 print:border-gray-200 print:break-before-page">
