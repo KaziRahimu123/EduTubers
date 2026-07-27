@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   ChevronRight, ChevronLeft, CheckCircle,
-  Lightbulb, RotateCcw, BookOpen, ListChecks, X, MessageSquare, Send, Lock,
+  Lightbulb, RotateCcw, BookOpen, ListChecks, X, MessageSquare, Send, Lock, Pencil,
 } from 'lucide-react';
 import { dbGetCourse, dbGetReviews, dbAddReview, dbSaveTaskAttempt, dbIncrementViews, dbIncrementCompletions } from '@/lib/db';
 import { cleanTitle } from '@/lib/cleanTitle';
@@ -295,6 +295,7 @@ function TaskCard({
   const [showHint, setShowHint] = useState(false);
   const [showReview, setShowReview] = useState(false);
   const [answerRevealed, setAnswerRevealed] = useState(false);
+  const [userAnswer, setUserAnswer] = useState('');
 
   const hasHint        = cfg.includeHints && !!task.hint;
   const hasReviewNote  = !!task.reviewNote;
@@ -342,6 +343,24 @@ function TaskCard({
           </div>
         )}
 
+        {/* ── Interactive Workspace / Writing Box ─────────────────────── */}
+        <div className="mb-4 space-y-1.5">
+          <label className="block text-xs font-semibold text-gray-700 flex items-center gap-1.5">
+            <Pencil size={13} className="text-blue-600" />
+            Your Answer / Workspace (Type what you think before checking the answer):
+          </label>
+          <textarea
+            value={userAnswer}
+            onChange={e => setUserAnswer(e.target.value)}
+            rows={3}
+            placeholder="Type your response or thoughts here..."
+            className="w-full px-3.5 py-2.5 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 placeholder-gray-400 resize-y shadow-xs"
+          />
+          <p className="text-[11px] text-gray-400 italic">
+            Self-practice workspace: Write your thoughts above, then click below to compare with the creator&apos;s solution!
+          </p>
+        </div>
+
         {/* Hint + Review note row */}
         {(hasHint || hasReviewNote) && (
           <div className="mb-4 flex flex-wrap gap-2">
@@ -381,23 +400,32 @@ function TaskCard({
               disabled={!answersVisible}
               onClick={() => { setAnswerRevealed(true); onMarked('correct'); }}
               className={clsx(
-                'inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg transition-colors',
+                'inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl transition-all shadow-sm',
                 answersVisible
-                  ? 'bg-green-600 text-white hover:bg-green-700 shadow-sm'
+                  ? 'bg-green-600 text-white hover:bg-green-700'
                   : 'bg-gray-100 text-gray-300 cursor-not-allowed',
               )}>
-              <CheckCircle size={14} /> Check Answer
+              <CheckCircle size={14} /> Reveal Sample Answer & Solution
             </button>
           ) : (
             <div className="space-y-3">
-              <div className="rounded-lg border-2 border-gray-200 bg-gray-50 p-4">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                  Answer / Solution
+              {userAnswer.trim() && (
+                <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-3.5">
+                  <p className="text-xs font-bold text-blue-800 uppercase tracking-wide mb-1">
+                    Your Typed Answer:
+                  </p>
+                  <p className="text-sm text-gray-800 whitespace-pre-wrap">{userAnswer}</p>
+                </div>
+              )}
+              <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50/60 p-4">
+                <p className="text-xs font-bold text-emerald-800 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                  <CheckCircle size={14} className="text-emerald-600" />
+                  Creator Sample Answer & Solution
                 </p>
                 <RichContent html={task.answerKey} />
               </div>
               {task.explanation && (
-                <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-3">
+                <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3">
                   <p className="text-xs font-semibold text-blue-700 mb-1">Explanation</p>
                   <p className="text-xs text-gray-700 leading-relaxed">{task.explanation}</p>
                 </div>
