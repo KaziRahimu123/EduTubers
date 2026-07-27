@@ -556,14 +556,8 @@ export default function Generator() {
               Paste a transcript, or upload up to 3 files (PDFs, audio, or video) — get flashcard decks, quizzes, interactive challenges, content guides, and illustrated explainers in seconds.
             </p>
           </div>
-          <span className={`flex-shrink-0 text-xs font-medium px-2.5 py-1 rounded-full border ${
-            genRemain === 0
-              ? 'bg-red-50 border-red-200 text-red-600 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400'
-              : genRemain <= 3
-              ? 'bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-900/20 dark:border-amber-700 dark:text-amber-400'
-              : 'bg-gray-50 border-gray-200 text-gray-500 dark:bg-slate-800 dark:border-slate-600 dark:text-slate-400'
-          }`}>
-            {genUsed} / {GENERATION_LIMIT_PER_3_DAYS} used (3 days)
+          <span className="flex-shrink-0 text-xs font-semibold px-2.5 py-1 rounded-full border bg-blue-50 border-blue-200 text-blue-700">
+            ✦ Unlimited Generations
           </span>
         </div>
 
@@ -962,7 +956,7 @@ export default function Generator() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-gray-700 dark:text-slate-300">Generate images for this asset</p>
-                    <p className="text-xs text-gray-400 dark:text-slate-500 mt-0.5">AI-generated images with editable captions · Max 20 per 3 days</p>
+                    <p className="text-xs text-gray-400 dark:text-slate-500 mt-0.5">AI-generated images with editable captions</p>
                   </div>
                   <Toggle on={generateImages} onToggle={() => setGenerateImages(v => !v)} />
                 </div>

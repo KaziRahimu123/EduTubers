@@ -342,50 +342,54 @@ function SectionCard({
 
       <div className={`pdf-section-body px-6 pb-6 pt-4 space-y-6 ${!open ? 'hidden print:block' : ''}`}>
 
-        {/* Section illustration */}
-        <div className="flex justify-center rounded-xl overflow-hidden border border-gray-100 print:border-0"
-          style={{ backgroundColor: color.lightBg, minHeight: '140px' }}>
-          {isLoadingImg && (
-            <div className="flex flex-col items-center justify-center gap-2 py-10 w-full">
-              <div className="w-5 h-5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
-              <span className="text-xs text-gray-400">Generating illustration…</span>
-            </div>
-          )}
-          {imgFailed && (
-            <div className="flex flex-col items-center justify-center gap-2 py-8 w-full print:hidden">
-              <ImageOff size={22} className="text-gray-300" />
-              <span className="text-xs text-gray-400">Image generation failed</span>
-              <div className="flex gap-2">
-                <button onClick={onRegenerateImage}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs text-gray-600 border border-gray-200 bg-white rounded-lg hover:bg-gray-50">
-                  <RefreshCw size={10} /> Retry
-                </button>
-                <label className="inline-flex items-center gap-1 px-2.5 py-1 text-xs text-gray-600 border border-gray-200 bg-white rounded-lg hover:bg-gray-50 cursor-pointer">
-                  <Upload size={10} /> Upload
-                  <input type="file" accept="image/*" className="sr-only"
-                    onChange={e => { const f = e.target.files?.[0]; if (f) onUploadImage(f); }} />
-                </label>
+        {/* Section illustration — only render when image exists, generating, or creator editing */}
+        {(imageUrl || isLoadingImg || (imgFailed && isCreator)) && (
+          <div className="flex justify-center rounded-xl overflow-hidden border border-gray-100 print:border-0"
+            style={{ backgroundColor: color.lightBg, minHeight: '140px' }}>
+            {isLoadingImg && (
+              <div className="flex flex-col items-center justify-center gap-2 py-10 w-full">
+                <div className="w-5 h-5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+                <span className="text-xs text-gray-400">Generating illustration…</span>
               </div>
-            </div>
-          )}
-          {imageUrl && !isLoadingImg && (
-            <div className="relative group w-full">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={imageUrl} alt={section.title} className="w-full object-contain block" />
-              <div className="print:hidden absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1.5">
-                <button onClick={onRegenerateImage}
-                  className="inline-flex items-center gap-1 px-2 py-1 text-xs text-white bg-black/50 rounded-lg hover:bg-black/70">
-                  <RefreshCw size={9} /> Regen
-                </button>
-                <label className="inline-flex items-center gap-1 px-2 py-1 text-xs text-white bg-black/50 rounded-lg hover:bg-black/70 cursor-pointer">
-                  <Upload size={9} /> Replace
-                  <input type="file" accept="image/*" className="sr-only"
-                    onChange={e => { const f = e.target.files?.[0]; if (f) onUploadImage(f); }} />
-                </label>
+            )}
+            {imgFailed && isCreator && (
+              <div className="flex flex-col items-center justify-center gap-2 py-8 w-full print:hidden">
+                <ImageOff size={22} className="text-gray-300" />
+                <span className="text-xs text-gray-400">Image generation failed</span>
+                <div className="flex gap-2">
+                  <button onClick={onRegenerateImage}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs text-gray-600 border border-gray-200 bg-white rounded-lg hover:bg-gray-50">
+                    <RefreshCw size={10} /> Retry
+                  </button>
+                  <label className="inline-flex items-center gap-1 px-2.5 py-1 text-xs text-gray-600 border border-gray-200 bg-white rounded-lg hover:bg-gray-50 cursor-pointer">
+                    <Upload size={10} /> Upload
+                    <input type="file" accept="image/*" className="sr-only"
+                      onChange={e => { const f = e.target.files?.[0]; if (f) onUploadImage(f); }} />
+                  </label>
+                </div>
               </div>
-            </div>
-          )}
-        </div>
+            )}
+            {imageUrl && !isLoadingImg && (
+              <div className="relative group w-full">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={imageUrl} alt={section.title} className="w-full object-contain block" />
+                {isCreator && (
+                  <div className="print:hidden absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1.5">
+                    <button onClick={onRegenerateImage}
+                      className="inline-flex items-center gap-1 px-2 py-1 text-xs text-white bg-black/50 rounded-lg hover:bg-black/70">
+                      <RefreshCw size={9} /> Regen
+                    </button>
+                    <label className="inline-flex items-center gap-1 px-2 py-1 text-xs text-white bg-black/50 rounded-lg hover:bg-black/70 cursor-pointer">
+                      <Upload size={9} /> Replace
+                      <input type="file" accept="image/*" className="sr-only"
+                        onChange={e => { const f = e.target.files?.[0]; if (f) onUploadImage(f); }} />
+                    </label>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Overview */}
         {section.overview !== undefined && (
