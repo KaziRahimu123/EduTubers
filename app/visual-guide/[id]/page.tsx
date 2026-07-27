@@ -629,88 +629,88 @@ export default function VisualGuidePage() {
                           )}
                         </div>
 
-                        {/* Two-column body (or single column if no image generated) */}
-                        {(() => {
-                          const hasValidImage = !isLoading && !notStarted && !hasFailed && Boolean(imgState);
-                          const showImageCol  = hasValidImage || isLoading || (isCreator && (notStarted || hasFailed));
-                          return (
-                            <div className="flex flex-row">
-                              {/* Left: image column — only shown if image exists, is loading, or creator is editing */}
-                              {showImageCol && (
-                                <div className="w-2/5 flex items-center justify-center flex-shrink-0" style={{ backgroundColor: accent.pageBg, borderRight: `2px solid ${accent.border}` }}>
-                                  {isLoading && (
-                                    <div className="flex flex-col items-center justify-center gap-2 py-10">
-                                      <div className="w-6 h-6 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
-                                      <span className="text-xs text-gray-400">Generating…</span>
-                                      <button
-                                        onClick={() => { cancelledRef.current = true; setGenerating(false); setImageUrls(prev => ({ ...prev, [i]: undefined })); }}
-                                        className="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-600 border border-gray-300 bg-white rounded-lg hover:bg-gray-50"
-                                      >
-                                        <StopCircle size={10} /> Stop
-                                      </button>
-                                    </div>
-                                  )}
-                                  {notStarted && isCreator && (
-                                    <div className="print:hidden flex flex-col items-center justify-center gap-2 px-4 py-10">
-                                      <ImageOff size={20} style={{ color: accent.border }} />
-                                      <span className="text-xs text-center" style={{ color: accent.label }}>No image</span>
-                                      <button onClick={() => regenerate(i)} className="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-600 border border-gray-300 bg-white rounded-lg hover:bg-gray-50">
-                                        <RefreshCw size={10} /> Generate
-                                      </button>
-                                      <label className="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-600 border border-gray-300 bg-white rounded-lg hover:bg-gray-50 cursor-pointer">
-                                        <Upload size={10} /> Upload
-                                        <input type="file" accept="image/*" className="sr-only" onChange={e => { const f = e.target.files?.[0]; if (f) handleImageUpload(i, f); }} />
-                                      </label>
-                                    </div>
-                                  )}
-                                  {!isLoading && !notStarted && hasFailed && isCreator && (
-                                    <div className="flex flex-col items-center justify-center gap-2 px-4 py-10">
-                                      <ImageOff size={24} style={{ color: accent.border }} />
-                                      <span className="text-xs text-center" style={{ color: accent.label }}>Failed</span>
-                                      {imgError && <span className="text-xs text-red-500 text-center break-words">{imgError}</span>}
-                                      <div className="print:hidden flex gap-1.5 flex-wrap justify-center">
-                                        <button onClick={() => regenerate(i)} className="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-600 border border-gray-300 bg-white rounded-lg hover:bg-gray-50">
-                                          <RefreshCw size={10} /> Retry
-                                        </button>
-                                        <label className="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-600 border border-gray-300 bg-white rounded-lg hover:bg-gray-50 cursor-pointer">
-                                          <Upload size={10} /> Upload
-                                          <input type="file" accept="image/*" className="sr-only" onChange={e => { const f = e.target.files?.[0]; if (f) handleImageUpload(i, f); }} />
-                                        </label>
-                                      </div>
-                                    </div>
-                                  )}
-                                  {hasValidImage && (
-                                    <div className="w-full">
-                                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                                      <img
-                                        src={imgState}
-                                        alt={mod.imageCaption || mod.title}
-                                        className="w-full object-contain block"
-                                        onError={() => setImageUrls(prev => ({ ...prev, [i]: '' }))}
-                                      />
-                                      {isCreator && (
-                                        <div className="print:hidden flex gap-1 justify-center py-1.5 px-2">
-                                          <button onClick={() => regenerate(i)} className="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-600 border border-gray-300 bg-white rounded-lg hover:bg-gray-50">
-                                            <RefreshCw size={9} /> Regen
-                                          </button>
-                                          <label className="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-600 border border-gray-300 bg-white rounded-lg hover:bg-gray-50 cursor-pointer">
-                                            <Upload size={9} /> Replace
-                                            <input type="file" accept="image/*" className="sr-only" onChange={e => { const f = e.target.files?.[0]; if (f) handleImageUpload(i, f); }} />
-                                          </label>
-                                        </div>
-                                      )}
-                                      <CaptionField
-                                        value={mod.imageCaption ?? ''}
-                                        onChange={v => patchCaption(i, v)}
-                                        accentColor={accent.label}
-                                      />
-                                    </div>
-                                  )}
-                                </div>
-                              )}
+                        {/* Two-column body */}
+                        <div className="flex flex-row">
+                          {/* Left: image column */}
+                          <div className="w-2/5 flex items-center justify-center flex-shrink-0" style={{ backgroundColor: accent.pageBg, borderRight: `2px solid ${accent.border}` }}>
+                            {isLoading && (
+                              <div className="flex flex-col items-center justify-center gap-2 py-10">
+                                <div className="w-6 h-6 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+                                <span className="text-xs text-gray-400">Generating…</span>
+                                <button
+                                  onClick={() => { cancelledRef.current = true; setGenerating(false); setImageUrls(prev => ({ ...prev, [i]: undefined })); }}
+                                  className="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-600 border border-gray-300 bg-white rounded-lg hover:bg-gray-50"
+                                >
+                                  <StopCircle size={10} /> Stop
+                                </button>
+                              </div>
+                            )}
+                            {notStarted && (
+                              <div className="print:hidden flex flex-col items-center justify-center gap-2 px-4 py-10">
+                                <ImageOff size={20} style={{ color: accent.border }} />
+                                <span className="text-xs text-center" style={{ color: accent.label }}>No image</span>
+                                {isCreator && (
+                                  <>
+                                    <button onClick={() => regenerate(i)} className="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-600 border border-gray-300 bg-white rounded-lg hover:bg-gray-50">
+                                      <RefreshCw size={10} /> Generate
+                                    </button>
+                                    <label className="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-600 border border-gray-300 bg-white rounded-lg hover:bg-gray-50 cursor-pointer">
+                                      <Upload size={10} /> Upload
+                                      <input type="file" accept="image/*" className="sr-only" onChange={e => { const f = e.target.files?.[0]; if (f) handleImageUpload(i, f); }} />
+                                    </label>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                            {!isLoading && !notStarted && hasFailed && (
+                              <div className="flex flex-col items-center justify-center gap-2 px-4 py-10">
+                                <ImageOff size={24} style={{ color: accent.border }} />
+                                <span className="text-xs text-center" style={{ color: accent.label }}>Failed</span>
+                                {imgError && <span className="text-xs text-red-500 text-center break-words">{imgError}</span>}
+                                {isCreator && (
+                                  <div className="print:hidden flex gap-1.5 flex-wrap justify-center">
+                                    <button onClick={() => regenerate(i)} className="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-600 border border-gray-300 bg-white rounded-lg hover:bg-gray-50">
+                                      <RefreshCw size={10} /> Retry
+                                    </button>
+                                    <label className="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-600 border border-gray-300 bg-white rounded-lg hover:bg-gray-50 cursor-pointer">
+                                      <Upload size={10} /> Upload
+                                      <input type="file" accept="image/*" className="sr-only" onChange={e => { const f = e.target.files?.[0]; if (f) handleImageUpload(i, f); }} />
+                                    </label>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            {!isLoading && !notStarted && !hasFailed && imgState && (
+                              <div className="w-full">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={imgState}
+                                  alt={mod.imageCaption || mod.title}
+                                  className="w-full object-contain block"
+                                  onError={() => setImageUrls(prev => ({ ...prev, [i]: '' }))}
+                                />
+                                {isCreator && (
+                                  <div className="print:hidden flex gap-1 justify-center py-1.5 px-2">
+                                    <button onClick={() => regenerate(i)} className="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-600 border border-gray-300 bg-white rounded-lg hover:bg-gray-50">
+                                      <RefreshCw size={9} /> Regen
+                                    </button>
+                                    <label className="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-600 border border-gray-300 bg-white rounded-lg hover:bg-gray-50 cursor-pointer">
+                                      <Upload size={9} /> Replace
+                                      <input type="file" accept="image/*" className="sr-only" onChange={e => { const f = e.target.files?.[0]; if (f) handleImageUpload(i, f); }} />
+                                    </label>
+                                  </div>
+                                )}
+                                <CaptionField
+                                  value={mod.imageCaption ?? ''}
+                                  onChange={v => patchCaption(i, v)}
+                                  accentColor={accent.label}
+                                />
+                              </div>
+                            )}
+                          </div>
 
-                              {/* Notes column: full width (w-full) if no image, or w-3/5 if image is present */}
-                              <div className={`${showImageCol ? 'w-3/5' : 'w-full'} flex flex-col p-5`} style={{ backgroundColor: accent.bg }}>
+                          {/* Right: notes */}
+                          <div className="w-3/5 flex flex-col p-5" style={{ backgroundColor: accent.bg }}>
                             {mod.objective !== undefined && (
                               <p className="text-sm font-semibold italic mb-3 pb-2 border-b" style={{ color: accent.label, borderColor: accent.border }}>
                                 <EditableText
@@ -732,8 +732,8 @@ export default function VisualGuidePage() {
                                 accentColor={accent.label}
                               />
                             </div>
-                          );
-                        })()}
+                          </div>
+                        </div>
                       </div>
                     );
                   })}
