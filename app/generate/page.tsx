@@ -371,11 +371,23 @@ export default function Generator() {
       const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (!AudioContextClass) return null;
       
-      const audioCtx = new AudioContextClass({ sampleRate: 16000 });
+      const audioCtx = new AudioContextClass();
       const decoded = await audioCtx.decodeAudioData(arrayBuffer);
       
-      const channelData = decoded.getChannelData(0);
-      const dataLength = channelData.length * 2;
+      const numChannels = decoded.numberOfChannels;
+      const length = decoded.length;
+      const sampleRate = decoded.sampleRate;
+      
+      // Mix ALL audio channels together so no panned voice or right-channel audio is ever missed!
+      const mono = new Float32Array(length);
+      for (let c = 0; c < numChannels; c++) {
+        const channelData = decoded.getChannelData(c);
+        for (let i = 0; i < length; i++) {
+          mono[i] += channelData[i] / numChannels;
+        }
+      }
+      
+      const dataLength = length * 2;
       const headerLength = 44;
       const totalLength = headerLength + dataLength;
       
@@ -389,18 +401,18 @@ export default function Generator() {
       writeString(8, 'WAVE');
       writeString(12, 'fmt ');
       out.setUint32(16, 16, true);
-      out.setUint16(20, 1, true); // mono
-      out.setUint16(22, 1, true); // 1 channel
-      out.setUint32(24, 16000, true);
-      out.setUint32(28, 32000, true);
-      out.setUint16(32, 2, true);
-      out.setUint16(34, 16, true);
+      out.setUint16(20, 1, true); // PCM format
+      out.setUint16(22, 1, true); // Mono (all channels mixed)
+      out.setUint32(24, sampleRate, true);
+      out.setUint32(28, sampleRate * 2, true); // Byte rate
+      out.setUint16(32, 2, true); // Block align
+      out.setUint16(34, 16, true); // 16-bit
       writeString(36, 'data');
       out.setUint32(40, dataLength, true);
       
       let offset = 44;
-      for (let i = 0; i < channelData.length; i++) {
-        const s = Math.max(-1, Math.min(1, channelData[i]));
+      for (let i = 0; i < length; i++) {
+        const s = Math.max(-1, Math.min(1, mono[i]));
         out.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
         offset += 2;
       }

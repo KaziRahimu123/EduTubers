@@ -74,8 +74,9 @@ async function splitToMp3Segments(inputPath: string, outputDir: string): Promise
     '-i', inputPath,
     '-vn',                           // strip video
     '-acodec', 'libmp3lame',
-    '-ab', '64k',
-    '-ac', '1',                      // mono
+    '-ab', '128k',                   // crystal clear 128 kbps
+    '-ar', '44100',                  // 44.1 kHz sample rate
+    '-ac', '1',                      // mono downmix
     '-f', 'segment',
     '-segment_time', String(SEGMENT_DURATION_SECS),
     '-reset_timestamps', '1',
