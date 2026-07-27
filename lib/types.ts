@@ -407,8 +407,8 @@ export const GENERATION_TIERS = [
 
 export type GenerationTierId = typeof GENERATION_TIERS[number]['id'];
 
-export const GENERATION_LIMIT_PER_3_DAYS = 999999;
-export const IMAGE_LIMIT_PER_3_DAYS = 999999;
+export const GENERATION_LIMIT_PER_3_DAYS = 10;
+export const IMAGE_LIMIT_PER_3_DAYS = 20;
 
 /** @deprecated use GENERATION_LIMIT_PER_3_DAYS */
 export const DAILY_GENERATION_LIMIT = GENERATION_LIMIT_PER_3_DAYS;
