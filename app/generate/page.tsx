@@ -211,10 +211,13 @@ export default function Generator() {
 
     // Validate each new file's type
     for (const f of newFiles) {
+      const ext = f.name.toLowerCase().split('.').pop() ?? '';
+      const isKnownMediaExt = ['mov', 'mp4', 'webm', 'mp3', 'wav', 'flac', 'ogg', 'pdf'].includes(ext);
       const allowed =
         f.type === 'application/pdf' ||
         ALLOWED_AUDIO_TYPES.has(f.type) ||
-        ALLOWED_VIDEO_TYPES.has(f.type);
+        ALLOWED_VIDEO_TYPES.has(f.type) ||
+        isKnownMediaExt;
       if (!allowed) {
         setFileError(`"${f.name}" is not a supported format. Accepted: PDF, MP4, MOV, WebM, MP3, WAV, FLAC.`);
         return;
@@ -288,11 +291,110 @@ export default function Generator() {
     return trimmed;
   }
 
+  async function extractAudioBlobFromMedia(file: File): Promise<Blob> {
+    if (file.type.startsWith('audio/') && file.size <= 4 * 1024 * 1024) {
+      return file;
+    }
+    return new Promise<Blob>(async (resolve) => {
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        if (!AudioCtx) return resolve(file);
+        const audioCtx = new AudioCtx();
+
+        let audioBuffer: AudioBuffer;
+        try {
+          audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+        } catch {
+          audioCtx.close();
+          return resolve(file);
+        }
+
+        const targetSampleRate = 16000;
+        const offlineCtx = new OfflineAudioContext(1, Math.ceil(audioBuffer.duration * targetSampleRate), targetSampleRate);
+        const source = offlineCtx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(offlineCtx.destination);
+        source.start(0);
+
+        const renderedBuffer = await offlineCtx.startRendering();
+        audioCtx.close();
+
+        const wavBlob = audioBufferToWavBlob(renderedBuffer);
+        resolve(wavBlob);
+      } catch {
+        resolve(file);
+      }
+    });
+  }
+
+  function audioBufferToWavBlob(buffer: AudioBuffer): Blob {
+    const numOfChan = 1;
+    const sampleRate = buffer.sampleRate;
+    const length = buffer.length * numOfChan * 2 + 44;
+    const out = new DataView(new ArrayBuffer(length));
+    const channel = buffer.getChannelData(0);
+
+    function writeString(offset: number, str: string) {
+      for (let i = 0; i < str.length; i++) {
+        out.setUint8(offset + i, str.charCodeAt(i));
+      }
+    }
+
+    writeString(0, 'RIFF');
+    out.setUint32(4, 36 + buffer.length * 2, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    out.setUint32(16, 16, true);
+    out.setUint16(20, 1, true);
+    out.setUint16(22, numOfChan, true);
+    out.setUint32(24, sampleRate, true);
+    out.setUint32(28, sampleRate * numOfChan * 2, true);
+    out.setUint16(32, numOfChan * 2, true);
+    out.setUint16(34, 16, true);
+    writeString(36, 'data');
+    out.setUint32(40, buffer.length * 2, true);
+
+    let offset = 44;
+    for (let i = 0; i < buffer.length; i++) {
+      const sample = Math.max(-1, Math.min(1, channel[i]));
+      out.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+      offset += 2;
+    }
+
+    return new Blob([out], { type: 'audio/wav' });
+  }
+
   async function transcribeMedia(file: File): Promise<string> {
+    let payloadFile: File | Blob = file;
+    const ext = file.name.toLowerCase().split('.').pop() ?? '';
+    if (file.size > 3 * 1024 * 1024 || file.type.startsWith('video/') || ['mov', 'mp4', 'webm'].includes(ext)) {
+      try {
+        payloadFile = await extractAudioBlobFromMedia(file);
+      } catch {
+        payloadFile = file;
+      }
+    }
+
     const formData = new FormData();
-    formData.append('file', file);
-    const res  = await fetch('/api/transcribe', { method: 'POST', body: formData });
-    const data = await res.json() as { transcript?: string; error?: string };
+    const sendName = file.name.replace(/\.[^/.]+$/, "") + ".wav";
+    formData.append('file', payloadFile, sendName);
+
+    const res = await fetch('/api/transcribe', { method: 'POST', body: formData });
+    const text = await res.text();
+    let data: { transcript?: string; error?: string } = {};
+    try {
+      data = JSON.parse(text);
+    } catch {
+      if (!res.ok) {
+        throw new Error(
+          res.status === 413
+            ? 'File payload is too large for the server. Please use a shorter video clip.'
+            : `Server error (${res.status}): ${text.slice(0, 120)}`
+        );
+      }
+    }
+
     if (!res.ok || data.error) throw new Error(data.error ?? 'Transcription failed.');
     return data.transcript ?? '';
   }
