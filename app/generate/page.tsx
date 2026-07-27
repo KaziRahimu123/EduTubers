@@ -424,19 +424,6 @@ export default function Generator() {
   }
 
   async function transcribeMedia(file: File): Promise<string> {
-    // 1. Try client-side audio extraction first (converts 30 MB video -> 1.5 MB WAV in browser!)
-    if (file.type.startsWith('video/') || file.size > 2.5 * 1024 * 1024) {
-      const extractedBlob = await extractAudioInBrowser(file);
-      if (extractedBlob && extractedBlob.size <= 4 * 1024 * 1024) {
-        const formData = new FormData();
-        formData.append('file', extractedBlob, file.name.replace(/\.[^/.]+$/, '') + '.wav');
-        const res = await fetch('/api/transcribe', { method: 'POST', body: formData });
-        const text = await res.text();
-        let data: { transcript?: string; error?: string } = {};
-        try { data = JSON.parse(text); } catch { /* noop */ }
-        if (res.ok && data.transcript) return data.transcript;
-      }
-    }
 
     const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MB per chunk
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
