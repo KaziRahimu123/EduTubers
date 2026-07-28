@@ -16,7 +16,7 @@ Built for the IBM AI Builders Challenge (July 2026 / Creative Industries & AI).
 
 | Section | Description |
 | :--- | :--- |
-| **What** | Ingests full-length videos, podcasts, PDFs, and articles (up to 3 files / 100 MB) and generates 5 active-recall learning formats (Flashcard Decks, Audience Quizzes, Practice Tasks, Content Guides, and Illustrated Explainers) in under 45 seconds. |
+| **What** | Ingests full-length videos, podcasts, PDFs, and articles (up to 3 files / 100 MB) and generates 5 active-recall learning formats (Flashcard Decks, Audience Quizzes, Practice Tasks, Content Guides, and Illustrated Explainers) each in under 45 seconds. |
 | **Why it's different** | Standard AI tools truncate long media past 10 minutes and output static, read-only text summaries. EduTubers processes full-length multi-file sources without truncation and provides built-in studio editors so creators can manually edit every card, question, or task before publishing. |
 | **Who it's for** | Educational content creators, YouTubers, podcasters, and newsletter writers in the Creative Industries who want to convert passive audience consumption into active recall experiences. |
 | **Full-source, not truncated** | Ingests up to 3 files simultaneously across IBM Granite 3.0's 128K context window on watsonx.ai. Every concept from the beginning, middle, and end of long content is captured with zero tail-end drop-off. |
