@@ -4,7 +4,7 @@
 
 **Turn your content into interactive audience experiences.**
 
-EduTubers is a full-source content intelligence platform built for YouTubers, podcasters, newsletter writers, and digital creators. When a creator uploads a video, audio, podcast, PDF document, or transcript (up to 3 files simultaneously), EduTubers processes the material using a hybrid pipeline of IBM Granite 3.0 (128K context via watsonx.ai) and OpenAI without tail-end truncation, dynamically generating 5 audience-ready formats (Flashcard Decks, Audience Quizzes, Interactive Challenges, Content Guides, and Illustrated Explainers) in seconds, complete with audience response tracking and AI-generated creator action plans.
+EduTubers is a full-source content intelligence platform built for educational content creators, YouTubers, podcasters, newsletter writers, and digital creators. When an educational content creator uploads a video, audio, podcast, PDF document, or transcript (up to 3 files simultaneously), EduTubers processes the material using a hybrid pipeline of IBM Granite 3.0 (128K context via watsonx.ai) and OpenAI without tail-end truncation, dynamically generating 5 audience-ready formats (Flashcard Decks, Audience Quizzes, Interactive Challenges, Content Guides, and Illustrated Explainers) in seconds, complete with audience response tracking and AI-generated creator action plans.
 
 Built for the IBM AI Builders Challenge (July 2026 / Creative Industries & AI).
 
@@ -18,7 +18,7 @@ Built for the IBM AI Builders Challenge (July 2026 / Creative Industries & AI).
 | :--- | :--- |
 | **What** | Ingests full-length videos, podcasts, PDFs, and articles (up to 3 files / 100 MB) and generates 5 active-recall learning formats (Flashcard Decks, Audience Quizzes, Practice Tasks, Content Guides, and Illustrated Explainers) in under 45 seconds. |
 | **Why it's different** | Standard AI tools truncate long media past 10 minutes and output static, read-only text summaries. EduTubers processes full-length multi-file sources without truncation and provides built-in studio editors so creators can manually edit every card, question, or task before publishing. |
-| **Who it's for** | Content creators, YouTubers, podcasters, and newsletter writers in the Creative Industries who want to convert passive audience consumption into active recall experiences. |
+| **Who it's for** | Educational content creators, YouTubers, podcasters, and newsletter writers in the Creative Industries who want to convert passive audience consumption into active recall experiences. |
 | **Full-source, not truncated** | Ingests up to 3 files simultaneously across IBM Granite 3.0's 128K context window on watsonx.ai. Every concept from the beginning, middle, and end of long content is captured with zero tail-end drop-off. |
 | **Hybrid AI Architecture** | Leverages IBM Granite 3.0 (128K context window via watsonx.ai) for full-source transcript ingestion and topic blueprinting, paired with OpenAI for structured asset generation. |
 | **Creator Editing Autonomy** | Zero locked AI outputs. Every generated flashcard, quiz question, choice, explanation, practice task, and content guide is 100% editable in custom built-in studio editors before publishing. |
@@ -48,13 +48,10 @@ Content is extracted & analyzed (IBM Granite 3.0 128K full-source blueprint)
 AI generates structured audience content (5 active-recall formats via OpenAI)
                            │
                            ▼
-Creator edits branding and content (Built-in studio editors for 100% control)
+Creator edits and publishes content (Built-in studio editors for 100% control)
                            │
                            ▼
-Each experience receives a public link (Instant shareable URL for audience)
-                           │
-                           ▼
-Audience interacts & gives feedback (Quiz attempts & performance insights)
+      Audience interacts with published content
 ```
 
 ---
@@ -63,9 +60,11 @@ Audience interacts & gives feedback (Quiz attempts & performance insights)
 
 Unlike traditional AI tools that produce static, uneditable summaries, EduTubers introduces a complete, creator-first workflow built on three unique capabilities:
 
-- **Closed-Loop Audience Feedback:** Most AI generators leave creators in the dark after content is published. EduTubers automatically captures live audience quiz attempts, ranking missed questions and running IBM Granite to generate actionable follow-up video scripts for creators.
-- **Built-in Studio Editors:** Standard AI tools return read-only text that cannot be modified. EduTubers features dedicated in-browser editors for every format, letting creators manually edit, add, or fine-tune any card, question, choice, or practice task before sharing.
-- **Multi-Source 128K Ingestion:** While standard tools process single files and truncate content after 10 minutes, EduTubers ingests up to 3 files simultaneously (PDFs, audio, or video up to 100 MB) across IBM Granite 3.0's 128K context window with zero tail-end drop-off.
+- **Interactive Learning & Analytics:** Most AI generators output flat, read-only text summaries that leave creators in the dark after publishing. EduTubers generates 5 active-recall learning formats and tracks real-time audience quiz attempts and completion analytics, offering clear visibility into learner comprehension.
+  
+- **Built-in Studio Editors:** Standard AI tools return uneditable text that cannot be customized. EduTubers features dedicated in-browser studio editors for every format, letting creators manually edit, add, or fine-tune any card, question, choice, or practice task before sharing.
+  
+- **Multi-Source 128K Ingestion:** While standard tools process single files and truncate content after 10 minutes, EduTubers ingests up to 3 files simultaneously (PDFs, MP3, MOV, or MP4 up to 100 MB) across IBM Granite 3.0's 128K context window with zero tail-end drop-off.
 
 ---
 
@@ -76,14 +75,15 @@ flowchart TD
     subgraph Client ["Client Layer (Next.js 16 App Router & React 19)"]
         UI["Tailwind CSS v4 & Lucide Icons UI"]
         Auth0Client["Auth0 Session & Cookie Auth"]
+        PDFExtract["Client-Side PDF Extractor (pdfjs-dist)"]
         Editors["In-Browser Studio Editors (Quizzes, Flashcards, Tasks, Guides)"]
     end
 
     subgraph API ["Serverless API Gateway (Node.js / Next.js 16)"]
+        UploadChunkRoute["/api/upload-chunk (Supabase Storage Chunker)"]
         TranscribeRoute["/api/transcribe (ffmpeg-static + Whisper-1)"]
-        ExtractPdfRoute["/api/extract-pdf (pdf-parse)"]
         GenerateRoute["/api/generate (Hybrid Generation Controller)"]
-        AnalyticsRoute["/api/analytics-insights (IBM Granite 3.0 Action Plan)"]
+        AnalyticsRoute["/api/analytics-insights (IBM Granite 3.0 Insights)"]
         DBRoute["/api/db (Authenticated Supabase Proxy)"]
         UploadImgRoute["/api/upload-image (Supabase Storage Uploader)"]
     end
@@ -99,24 +99,30 @@ flowchart TD
     end
 
     UI --> Auth0Client
+    UI --> PDFExtract
+    UI --> UploadChunkRoute
+    UploadChunkRoute --> SupabaseStorage
     UI --> TranscribeRoute
-    UI --> ExtractPdfRoute
     UI --> GenerateRoute
-    UI --> AnalyticsRoute
     GenerateRoute --> Granite
     Granite -->|Full-Source 128K Blueprint| OpenAIModel
     OpenAIModel -->|Structured Formats| DBRoute
     DBRoute --> SupabaseDB
     UploadImgRoute --> SupabaseStorage
+
 ```
 
 ### Architecture Breakdown
 
-- **Application & Session Layer:** Built on Next.js 16 (App Router) and React 19 with TypeScript and Tailwind CSS v4. User authentication and API session security are enforced server-side via Auth0 (`@auth0/nextjs-auth0`).
-- **Media Ingestion & Processing:** Media files (audio MP3/WAV, video MP4/WebM) are processed at `/api/transcribe` using `ffmpeg-static` and `fluent-ffmpeg` before calling OpenAI Whisper-1 via native multipart streams. Document files (PDFs) are extracted at `/api/extract-pdf` using `pdf-parse`.
-- **Two-Stage Hybrid AI Pipeline:** Generation is coordinated at `/api/generate`: Stage 1 (IBM Granite 3.0 via watsonx.ai) ingests full-source transcripts across IBM Granite's 128K context window, extracting a complete topic blueprint with zero tail-end truncation. Stage 2 (OpenAI Generation Engine) receives Granite's blueprint and generates 5 structured active-recall formats with full autonomous density allocation.
-- **Database & Asset Persistence:** All course records, quiz attempts, and user assets are stored in Supabase PostgreSQL via an authenticated REST proxy (`/api/db`) with strict Row-Level Security (RLS). AI-generated images are stored in Supabase Storage via `/api/upload-image`.
-- **Quiz Analytics & AI Creator Action Plan:** Audience quiz attempt results are logged in Supabase. The `/api/analytics-insights` endpoint ranks missed questions from most-wrong to least-wrong and invokes IBM Granite 3.0 on watsonx.ai to generate a targeted 60-Second Video Recap Script for the creator.
+- **Application & Session Layer:** Built on Next.js 16 (App Router) and React 19 with TypeScript and Vanilla CSS / Tailwind CSS. User authentication and session security are enforced server-side via Auth0 (`@auth0/nextjs-auth0`).
+  
+- **Media Ingestion & Processing:** Supports PDF, MP3, MOV, and MP4 files up to 100 MB. Large media files are chunked via `/api/upload-chunk` into Supabase Storage, then reassembled and processed at `/api/transcribe` using `ffmpeg-static` to extract high-fidelity 128kbps audio for OpenAI Whisper-1 transcription. PDF document text is extracted client-side using `pdfjs-dist`.
+  
+- **Two-Stage Hybrid AI Pipeline:** Generation is coordinated at `/api/generate`: **Stage 1** (IBM Granite 3.0 via watsonx.ai) ingests full-source transcripts across IBM Granite's 128K context window, extracting a comprehensive topic blueprint with zero tail-end truncation. **Stage 2** (OpenAI Asset Engine) receives Granite's blueprint and generates 5 structured active-recall formats with full autonomous density allocation.
+  
+- **Database & Asset Persistence:** All course records, quiz attempts, and user assets are stored in Supabase PostgreSQL via an authenticated API proxy (`/api/db`) with strict Row-Level Security (RLS). AI-generated images are stored in Supabase Storage via `/api/upload-image`.
+  
+- **Quiz & Learning Analytics:** Audience quiz attempt results and performance metrics are logged in Supabase. The `/api/analytics-insights` endpoint processes attempt history to calculate completion rates, average scores, and topic mastery.
 
 ---
 
@@ -124,13 +130,17 @@ flowchart TD
 
 IBM Bob was utilized as an AI pair programmer and systems architect throughout the complete development lifecycle of EduTubers:
 
-- **Hybrid Pipeline Architecture:** Designed the two-stage AI architecture—using IBM Granite 3.0 on watsonx.ai for 128K full-source transcript ingestion and topic blueprinting paired with structured asset engines.
-- **API & Network Hardening:** Hardened serverless REST proxy endpoints (`/api/db`), resolved database unique slug key collisions server-side, and optimized Whisper multipart stream handlers to eliminate TLS record errors.
-- **Studio Editor Engineering:** Refactored built-in in-browser studio editors for all 5 formats (Flashcard Decks, Audience Quizzes, Practice Tasks, Content Guides, and Illustrated Explainers), giving creators 100% manual editing control.
-- **Closed-Loop Analytics Engine:** Built the quiz response performance ranker and automated the IBM Granite 60-Second Video Recap Script generator in `/api/analytics-insights`.
+- **Hybrid Pipeline Architecture:** Co-designed the two-stage AI architecture—leveraging IBM Granite 3.0 on watsonx.ai for 128K full-source transcript ingestion and topic blueprinting paired with structured asset engines.
+  
+- **API & Network Hardening:** Hardened serverless REST proxy endpoints (`/api/db`), resolved database unique slug key collisions, and built a stateless Supabase Storage chunking pipeline (`/api/upload-chunk`) to bypass Vercel serverless request limits for large video files.
+  
+- **Studio Editor Engineering:** Built in-browser studio editors for all 5 formats (Flashcard Decks, Audience Quizzes, Practice Tasks, Content Guides, and Illustrated Explainers), giving creators 100% manual editing control.
+  
+- **Interactive Learner Features:** Implemented interactive scratchpad workspaces for Practice Tasks, custom section management for Content Guides, and complete light mode UI design consistency across the application.
 
----
+```
 
+```
 ## Develop
 
 ```bash
