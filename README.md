@@ -138,19 +138,15 @@ IBM Bob was utilized as an AI pair programmer and systems architect throughout t
   
 - **Interactive Learner Features:** Implemented interactive scratchpad workspaces for Practice Tasks, custom section management for Content Guides, and complete light mode UI design consistency across the application.
 
-```
 
-```
 ## Develop
 
 ```bash
 # 1. Clone the repository & navigate to workspace
-git clone https://github.com/TasinKazi/The-Bob-Effect.git
-cd The-Bob-Effect
-
+git clone https://github.com/KaziRahimu123/EduTubers.git
+cd EduTubers
 # 2. Configure local environment variables
 cp .env.example .env.local
-
 # 3. Install dependencies & start the local Next.js 16 dev server
 npm install && npm run dev
 ```
