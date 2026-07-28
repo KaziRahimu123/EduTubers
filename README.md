@@ -1,4 +1,4 @@
-![EduTubers Banner](./public/edutubers-white-banner.png)
+![EduTubers Banner](./public/edutubers-banner.png)
 
 # EDUTUBERS
 
