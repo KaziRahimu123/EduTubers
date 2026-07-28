@@ -8,7 +8,7 @@ EduTubers is a full-source content intelligence platform built for YouTubers, po
 
 Built for the IBM AI Builders Challenge (July 2026 / Creative Industries & AI).
 
-[Watch the 3-minute demo](https://youtube.com) · [Try the live demo](https://edutubers.com) · [Judge's Quick Guide](./JUDGE.md)
+[Watch the 3-minute demo](https://youtube.com) · [Try the live demo](https://edu-tubers.vercel.app) · [Judge's Quick Guide](./JUDGE.md)
 
 ---
 
