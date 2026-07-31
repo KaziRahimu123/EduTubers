@@ -4,7 +4,7 @@
 
 **Turn your content into interactive audience experiences.**
 
-EduTubers is a full-source content intelligence platform built for educational content creators, YouTubers, podcasters, newsletter writers, and digital creators. When an educational content creator uploads a video, audio, podcast, PDF document, or transcript (up to 3 files simultaneously), EduTubers processes the material using a hybrid pipeline of IBM Granite 3.0 (128K context via watsonx.ai) and OpenAI without tail-end truncation, dynamically generating 5 audience-ready formats (Flashcard Decks, Audience Quizzes, Interactive Challenges, Content Guides, and Illustrated Explainers) in seconds, complete with audience response tracking and AI-generated creator action plans.
+EduTubers is a full-source content intelligence platform built for educational content creators, YouTubers, podcasters, newsletter writers, and digital creators. When an educational content creator uploads a video, audio, podcast, PDF document, or transcript (up to 3 files simultaneously), EduTubers processes the material using a hybrid pipeline of IBM Granite 3.0 (128K context via watsonx.ai) and OpenAI without tail-end truncation, dynamically generating 5 audience-ready formats (Flashcard Decks, Audience Quizzes, Interactive Challenges, Content Guides, and Illustrated Explainers) in seconds, complete with audience quiz response tracking and AI-generated creator action plans.
 
 Built for the IBM AI Builders Challenge (July 2026 / Creative Industries & AI).
 
