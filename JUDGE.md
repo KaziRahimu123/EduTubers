@@ -11,7 +11,7 @@ Visit [https://edu-tubers.vercel.app](https://edu-tubers.vercel.app) and click *
 Go to `/generate` and upload a PDF document, video, or audio file (up to 3 files / 100 MB).
 
 ### Step 3: Experience 5 Active-Recall Formats
-Watch the hybrid AI engine build 5 distinct formats in under 45 seconds:
+Watch the hybrid AI engine build 5 distinct formats each in under 45 seconds:
 - 📚 **Flashcard Decks**
 - ✅ **Audience Quizzes**
 - 🧩 **Interactive Challenges**
